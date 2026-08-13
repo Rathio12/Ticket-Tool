@@ -58,6 +58,46 @@ def _bootstrap_venv():
 
 _bootstrap_venv()
 
+
+def _maybe_auto_install_service():
+    if os.environ.get("TICKETBOT_AUTO_SYSTEMD") != "1":
+        return
+    if sys.platform != "linux":
+        print("[auto-systemd] TICKETBOT_AUTO_SYSTEMD=1 but this isn't Linux — skipping.", flush=True)
+        return
+    if os.environ.get("INVOCATION_ID"):
+        return
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        print("[auto-systemd] TICKETBOT_AUTO_SYSTEMD=1 but not running as root — skipping. Run 'sudo bash deploy/install.sh' manually, or launch this with sudo once.", flush=True)
+        return
+
+    import shutil
+    import subprocess
+
+    if not shutil.which("systemctl"):
+        print("[auto-systemd] systemctl not found — skipping (not a systemd host).", flush=True)
+        return
+
+    root = os.path.dirname(os.path.abspath(__file__))
+    script = os.path.join(root, "deploy", "install.sh")
+    if not os.path.exists(script):
+        print("[auto-systemd] deploy/install.sh not found — skipping.", flush=True)
+        return
+
+    args = ["bash", script]
+    if os.environ.get("TICKETBOT_RESTART_SCHEDULE", "daily").lower() == "weekly":
+        args.append("--weekly")
+
+    print("[auto-systemd] Installing and starting the systemd service...", flush=True)
+    result = subprocess.run(args)
+    if result.returncode == 0:
+        print("[auto-systemd] Service installed and running under systemd — this foreground process is exiting so there's only one instance.", flush=True)
+        raise SystemExit(0)
+    print(f"[auto-systemd] Install script failed (exit {result.returncode}) — continuing in the foreground instead.", flush=True)
+
+
+_maybe_auto_install_service()
+
 import discord
 from discord.ext import commands
 from discord import app_commands

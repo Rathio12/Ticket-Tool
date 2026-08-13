@@ -30,6 +30,25 @@ sudo bash deploy/install.sh --weekly
 Re-run `deploy/install.sh` any time to pick up a new project path or user — it's safe to
 run repeatedly, it just overwrites the same two unit files.
 
+## Even quicker: let main.py do it for you
+
+Instead of running `install.sh` yourself, set `TICKETBOT_AUTO_SYSTEMD=1` in `.env` and
+start the bot as root once:
+
+```
+cd /opt/ticket-tool
+cp .env.example .env   # fill in DISCORD_TOKEN, set TICKETBOT_AUTO_SYSTEMD=1
+sudo python3 main.py
+```
+
+On startup it detects it's running as root on Linux and not already under systemd,
+runs `deploy/install.sh` for you, then exits the foreground process so systemd's copy
+is the only instance running. Safe to leave `TICKETBOT_AUTO_SYSTEMD=1` in `.env`
+permanently — every subsequent start under systemd sees `INVOCATION_ID` set (systemd
+sets this on every process it manages) and skips straight to running normally, and it
+no-ops entirely if you're not root or not on Linux. Set `TICKETBOT_RESTART_SCHEDULE=weekly`
+alongside it for a weekly restart instead of daily.
+
 ## Checking it worked
 
 ```
