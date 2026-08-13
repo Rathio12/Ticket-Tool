@@ -1,3 +1,14 @@
+<div align="center">
+
+![Ticket Tool](assets/banner.svg)
+
+![discord.py](https://img.shields.io/badge/discord.py-2.6%2B-5865F2?logo=discord&logoColor=white)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
+![Components V2](https://img.shields.io/badge/UI-Components%20V2-57F287)
+![Multi--guild](https://img.shields.io/badge/servers-unlimited-2B2D31)
+
+</div>
+
 # Ticket Tool
 
 A feature-rich, **multi-guild** Discord ticket management bot built with discord.py, using
@@ -7,6 +18,28 @@ Discord's Components V2 layout system for every panel, embed, and log entry (no 
 Install it once, invite it to any number of servers — each server configures itself
 independently with a single `/setup` command. There's no hardcoded guild, role, or
 channel anywhere in the code; all of that lives in per-guild config saved to disk.
+
+## What makes this different
+
+Most ticket bots stop at "open a channel, close a channel." This one tracks whether your
+team is actually **responding**, not just resolving:
+
+- **First-response SLA tracking** — every ticket silently tracks the time from open to the
+  first real staff message. If nobody replies within your configured window (default 15m),
+  the bot pings your staff role once in-channel and logs a breach to your escalation
+  channel — before the user gets frustrated and leaves, not after.
+- **SLA visibility in the live report** — the self-updating stats panel shows average
+  first-response time and how many closed tickets never got a reply at all, alongside the
+  usual open/closed counts and top-staff leaderboard.
+- **Fully self-serve, zero code changes per server** — one `/setup` command configures
+  everything; there is no bot-owner allowlist gating a server's ability to use it.
+- **No misbehaving timeouts** — every ticket button, panel, and dropdown is a persistent
+  view (stable `custom_id`, re-registered on every restart), so controls never silently
+  stop working after a Discord view timeout or a bot redeploy.
+
+Everything here works entirely through normal bot API calls (slash commands, buttons,
+channel messages) — no self-botting, scraping, or mass-DM behavior, so it stays well
+within Discord's Terms of Service and Developer Policy.
 
 ## Features
 
@@ -83,7 +116,7 @@ test server instead.
 | `/ticket option edit` | Edit a ticket option | Staff |
 | `/ticket option remove` | Remove an option from a panel | Staff |
 | `/ticket panel` | Re-send a panel to the current channel | Staff |
-| `/ticket config` | Configure max tickets, cooldown, auto-close | Staff |
+| `/ticket config` | Configure max tickets, cooldown, auto-close, SLA reminder | Staff |
 | `/ticket repair` | Audit and repair bot permissions | Staff |
 | `/ticket rename` | Rename the current ticket channel | Staff |
 | `/ticket add` | Add a member to the current ticket | Staff |
