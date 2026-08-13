@@ -1207,6 +1207,11 @@ class TicketCog(commands.Cog, name="TicketCog"):
                     existing_id = cfg.get("thread_channel_id")
                     parent = guild.get_channel(existing_id) if existing_id else None
                     if not parent:
+                        parent = discord.utils.find(
+                            lambda c: "ticket" in c.name.lower(),
+                            guild.text_channels,
+                        )
+                    if not parent:
                         try:
                             parent = await guild.create_text_channel(f"🎫-{panel_name.lower().replace(' ', '-')}")
                         except discord.Forbidden:
