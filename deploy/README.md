@@ -49,6 +49,15 @@ sets this on every process it manages) and skips straight to running normally, a
 no-ops entirely if you're not root or not on Linux. Set `TICKETBOT_RESTART_SCHEDULE=weekly`
 alongside it for a weekly restart instead of daily.
 
+## Install confirmation in Discord
+
+If `RESTART_LOG_CHANNEL_ID` is set in `.env`, `install.sh` posts to that channel itself
+(via a plain `curl` call to Discord's REST API, no bot connection needed) once it
+finishes: **"✅ ... installed and started as a systemd service"** on success, or
+**"❌ ... install failed"** if any step errors out — so you don't have to SSH back in
+just to check the install went through. This happens whether you ran `install.sh`
+directly or it was triggered automatically via `TICKETBOT_AUTO_SYSTEMD`.
+
 ## Checking it worked
 
 ```
@@ -84,3 +93,35 @@ sudo systemctl enable --now ticket-tool-restart.timer
 To switch the restart schedule manually, edit `OnCalendar=` in
 `/etc/systemd/system/ticket-tool-restart.timer` (`*-*-* 04:00:00` for daily,
 `Mon *-*-* 04:00:00` for weekly), then `sudo systemctl daemon-reload && sudo systemctl restart ticket-tool-restart.timer`.
+
+## Alternative: pm2 instead of systemd
+
+If you already run other bots/apps under [pm2](https://pm2.keymetrics.io/) on this VPS
+and would rather keep everything under one process manager, use
+`deploy/ecosystem.config.js` instead of the systemd unit — **don't run both** for the
+same bot; pick one supervisor.
+
+```
+npm install -g pm2
+cd /opt/ticket-tool
+pm2 start deploy/ecosystem.config.js
+pm2 save
+pm2 startup   # follow the printed command once, to survive reboots
+```
+
+pm2's `cron_restart` field in `ecosystem.config.js` does the same job as the systemd
+timer — it's set to `0 4 * * *` (daily at 04:00) by default. For weekly instead, edit
+that line to `0 4 * * 1` (04:00 every Monday), then `pm2 restart ticket-tool`. Crash
+recovery (`autorestart: true`) is pm2's own equivalent of systemd's `Restart=on-failure`.
+
+**Important:** the ecosystem file sets `TICKETBOT_AUTO_SYSTEMD=0` explicitly. Leave that
+as-is — if it were left enabled and pm2 runs the bot as root, `main.py` would try to
+install *and start the systemd unit too* on every restart, giving you two competing
+supervisors fighting over the same bot process. Pick pm2 **or** systemd, not both.
+
+Useful pm2 commands: `pm2 status`, `pm2 logs ticket-tool`, `pm2 restart ticket-tool`.
+
+The `RESTART_LOG_CHANNEL_ID` restart announcements ("🔁 Restarting" / "✅ Restart
+complete" / unclean-shutdown warnings) live in `main.py` itself and fire on any SIGTERM
+— they work the same under pm2 as under systemd. Only the install-success/failure
+message described above is specific to running `install.sh` for the systemd path.
