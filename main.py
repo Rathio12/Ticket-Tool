@@ -11,6 +11,52 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
+
+def _bootstrap_venv():
+    import subprocess
+    root = os.path.dirname(os.path.abspath(__file__))
+    venv_dir = os.path.join(root, "venv")
+    bindir = "Scripts" if os.name == "nt" else "bin"
+    vpy = os.path.join(venv_dir, bindir, "python.exe" if os.name == "nt" else "python")
+
+    if os.path.abspath(sys.prefix) == os.path.abspath(venv_dir):
+        return
+    if os.environ.get("_TICKETBOT_BOOTSTRAPPED") == "1" or os.environ.get("TICKETBOT_NO_BOOTSTRAP") == "1":
+        return
+
+    fresh = not os.path.exists(vpy)
+    try:
+        if fresh:
+            print("[bootstrap] No venv found — creating one…", flush=True)
+            subprocess.check_call([sys.executable, "-m", "venv", venv_dir])
+        req = os.path.join(root, "requirements.txt")
+        if os.path.exists(req) and (fresh or os.environ.get("TICKETBOT_INSTALL_DEPS") == "1"):
+            print("[bootstrap] Installing requirements…", flush=True)
+            subprocess.check_call([vpy, "-m", "pip", "install", "--upgrade", "pip", "-q"])
+            subprocess.check_call([vpy, "-m", "pip", "install", "-q", "-r", req])
+    except Exception as exc:
+        print(f"[bootstrap] setup failed ({exc}); continuing with current interpreter.", flush=True)
+        return
+
+    os.environ["_TICKETBOT_BOOTSTRAPPED"] = "1"
+    cmd = [vpy, os.path.abspath(__file__), *sys.argv[1:]]
+    if os.name == "nt":
+        print("[bootstrap] Launching inside venv…", flush=True)
+        raise SystemExit(subprocess.call(cmd))
+    try:
+        bindir_path = os.path.dirname(vpy)
+        for f in os.listdir(bindir_path):
+            fp = os.path.join(bindir_path, f)
+            if os.path.isfile(fp):
+                os.chmod(fp, 0o755)
+    except OSError:
+        pass
+    print("[bootstrap] Launching inside venv…", flush=True)
+    os.execv(vpy, cmd)
+
+
+_bootstrap_venv()
+
 import discord
 from discord.ext import commands
 from discord import app_commands

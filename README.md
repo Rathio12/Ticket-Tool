@@ -81,12 +81,7 @@ within Discord's Terms of Service and Developer Policy.
 
 ## Setup
 
-1. Install dependencies:
-```
-pip install -r requirements.txt
-```
-
-2. Copy `.env.example` to `.env` and fill in at least `DISCORD_TOKEN`:
+1. Copy `.env.example` to `.env` and fill in at least `DISCORD_TOKEN`:
 ```
 DISCORD_TOKEN=your_bot_token
 ```
@@ -94,12 +89,20 @@ Everything else in `.env` is optional — see the comments in `.env.example`. Yo
 **not** need to set `OWNER_IDS` for the bot to work; every server's administrators can
 fully configure and run their own ticket system with just `/setup`.
 
-3. Run:
+2. Run:
 ```
 python main.py
 ```
+`main.py` bootstraps itself — first run creates a local `venv/`, installs
+`requirements.txt` into it, then relaunches inside that venv automatically. Normal
+restarts after that are effectively instant (no reinstall). Set `TICKETBOT_NO_BOOTSTRAP=1`
+to skip this and use whatever interpreter is already active, or run
+`pip install -r requirements.txt` yourself first if you'd rather manage the venv by hand.
 
-4. In each Discord server, an administrator runs:
+Deploying long-term on a VPS? See [`deploy/README.md`](deploy/README.md) for a systemd
+service + a scheduled daily restart timer.
+
+3. In each Discord server, an administrator runs:
 ```
 /setup staff_role:@Support
 ```

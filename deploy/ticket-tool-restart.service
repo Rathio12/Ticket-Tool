@@ -1,0 +1,7 @@
+[Unit]
+Description=Restart the Ticket Tool bot service
+After=ticket-tool.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart ticket-tool.service
