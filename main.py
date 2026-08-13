@@ -78,16 +78,13 @@ intents.reactions = True
 bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents)
 bot.owner_ids = set(OWNER_IDS)
 
-# ---------------------------------------------------------------------------
-# CLI logger
-# ---------------------------------------------------------------------------
 
 _ANSI = {
-    "OK":   "\033[32m",   # green
-    "INFO": "\033[36m",   # cyan
-    "WARN": "\033[33m",   # yellow
-    "FAIL": "\033[31m",   # red
-    "ERR":  "\033[31m",   # red
+    "OK":   "\033[32m",
+    "INFO": "\033[36m",
+    "WARN": "\033[33m",
+    "FAIL": "\033[31m",
+    "ERR":  "\033[31m",
     "RESET":"\033[0m",
     "DIM":  "\033[2m",
 }
@@ -117,9 +114,6 @@ def _count_commands(cmds=None) -> int:
     return total
 
 
-# ---------------------------------------------------------------------------
-# File logger
-# ---------------------------------------------------------------------------
 _file_log = logging.getLogger("file_log")
 _file_log.setLevel(logging.DEBUG)
 _fh = logging.FileHandler("bot_debug.log", encoding="utf-8")
@@ -255,9 +249,6 @@ def _get_status_lines() -> list[str]:
 
 bot.get_status_lines = _get_status_lines
 
-# ---------------------------------------------------------------------------
-# Bot events
-# ---------------------------------------------------------------------------
 @bot.event
 async def on_ready():
     bot.ui.append_log("", "OK", f"Discord connected as {bot.user} ({bot.user.id})")
@@ -273,7 +264,6 @@ async def on_ready():
         bot.ui.append_log("", "INFO", f"Commands ready: {names} ({total_local} total)")
 
         if DEV_GUILD_ID:
-            # Fast local sync while developing — mirrors global commands to one guild instantly.
             guild_obj = discord.Object(id=DEV_GUILD_ID)
             bot.tree.copy_global_to(guild=guild_obj)
             await bot.tree.sync(guild=guild_obj)
@@ -295,15 +285,10 @@ async def on_guild_join(guild: discord.Guild):
 
 @bot.event
 async def on_command_error(ctx, error):
-    # cogs/errorhandler.py handles this fully; keep a bare fallback so
-    # CommandNotFound never spams the console if that cog fails to load.
     if isinstance(error, commands.CommandNotFound):
         return
     raise error
 
-# ---------------------------------------------------------------------------
-# Cog loader
-# ---------------------------------------------------------------------------
 async def load_cogs():
     for filename in sorted(os.listdir("./cogs")):
         if filename.endswith(".py"):
@@ -333,9 +318,6 @@ def setup_discord_logger(log_filename="bot_debug.log"):
     error_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
     logging.getLogger().addHandler(error_handler)
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 async def _graceful_shutdown():
     bot.ui.append_log("", "WARN", "Shutdown signal received — closing cleanly...")
     if bot.is_ready():

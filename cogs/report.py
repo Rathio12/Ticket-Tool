@@ -11,7 +11,6 @@ DATA_DIR   = Path(__file__).resolve().parent.parent / "Data"
 TICKET_DIR = DATA_DIR / "tickets"
 REPORT_DIR = DATA_DIR / "reports"
 
-# Stored per guild: {"channel_id": int, "message_id": int}
 def _report_path(guild_id: int) -> Path:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     return REPORT_DIR / f"{guild_id}.json"
@@ -39,10 +38,6 @@ def _delete_anchor(guild_id: int):
     if p.exists():
         p.unlink()
 
-
-# ---------------------------------------------------------------------------
-# Ticket stats
-# ---------------------------------------------------------------------------
 
 def _collect_stats(guild_id: int) -> dict:
     guild_dir = TICKET_DIR / str(guild_id)
@@ -136,10 +131,6 @@ def _collect_stats(guild_id: int) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Panel builder
-# ---------------------------------------------------------------------------
-
 _MEDALS = ["🥇", "🥈", "🥉", "④", "⑤"]
 
 
@@ -199,10 +190,6 @@ def _build_panel(guild: discord.Guild, stats: dict) -> PanelView:
     )
 
 
-# ---------------------------------------------------------------------------
-# Cog
-# ---------------------------------------------------------------------------
-
 class ReportCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -229,7 +216,6 @@ class ReportCog(commands.Cog):
             return
         anchor = _load_anchor(guild.id)
         if not anchor:
-            # No report channel configured for this guild yet — skip silently.
             return
         panel   = _build_panel(guild, stats)
         channel = await self._get_report_channel(guild)
@@ -239,7 +225,6 @@ class ReportCog(commands.Cog):
                 self.bot.ui.append_log("yellow", "WARN", f"report: configured channel unreachable for guild {guild.id}")
             return
 
-        # Try to edit existing message
         if anchor.get("message_id"):
             try:
                 msg = await channel.fetch_message(anchor["message_id"])
@@ -251,7 +236,6 @@ class ReportCog(commands.Cog):
                 if hasattr(self.bot, "ui"):
                     self.bot.ui.append_log("yellow", "WARN", f"report: message deleted in {guild.name}, re-creating")
             except Exception as e:
-                # V2→classic edit incompatibility: delete old and resend
                 if hasattr(self.bot, "ui"):
                     self.bot.ui.append_log("yellow", "WARN", f"report: edit failed ({e}), resending in {guild.name}")
                 try:
@@ -260,7 +244,6 @@ class ReportCog(commands.Cog):
                 except Exception:
                     pass
 
-        # Create a new persistent message
         try:
             msg = await channel.send(view=panel)
             _save_anchor(guild.id, channel.id, msg.id)
@@ -278,11 +261,9 @@ class ReportCog(commands.Cog):
     @report_loop.before_loop
     async def before_report_loop(self):
         await self.bot.wait_until_ready()
-        # Run once on startup to restore/update any existing message
         for guild in self.bot.guilds:
             await self._update_or_create(guild)
 
-    # Manual trigger
     @commands.command(name="report", hidden=True)
     @commands.has_permissions(administrator=True)
     async def force_report(self, ctx: commands.Context):
@@ -293,12 +274,10 @@ class ReportCog(commands.Cog):
         await self._update_or_create(ctx.guild)
         await ctx.message.add_reaction("✅")
 
-    # Set a custom channel for reports in this guild
     @commands.command(name="report_channel", hidden=True)
     @commands.has_permissions(administrator=True)
     async def set_report_channel(self, ctx: commands.Context, channel: discord.TextChannel):
         anchor = _load_anchor(ctx.guild.id)
-        # Clear existing message reference so a new one is sent in the new channel
         _save_anchor(ctx.guild.id, channel.id, anchor["message_id"] if anchor else 0)
         await ctx.send(f"✅ Report channel set to {channel.mention}. Run `!report` to post now.")
 

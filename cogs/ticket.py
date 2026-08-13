@@ -1,4 +1,3 @@
-# cogs/ticket.py
 """Comprehensive, multi-guild ticket system cog.
 Features:
 - Panels (button or dropdown) with configurable options.
@@ -27,9 +26,6 @@ from discord import app_commands, ui
 from core.config import OWNER_IDS, BOT_ERROR_CHANNEL_ID
 from core.design import Colors, PanelView, EntryView, BRAND_NAME
 
-# ---------------------------------------------------------------------------
-# Persistent Database Management (SQLite + JSON for transcripts)
-# ---------------------------------------------------------------------------
 class TicketDB:
     def __init__(self, base_path: Path):
         self.base_path = base_path
@@ -153,7 +149,6 @@ class TicketDB:
             except Exception as e:
                 print(f"[DB] Error saving config: {e}")
 
-    # ── SQLite ticket operations ──────────────────────────────
 
     async def insert_ticket(self, ticket_data: dict):
         async with self.lock:
@@ -233,7 +228,6 @@ class TicketDB:
             await self.save_config(data)
             print(f"[DB] Synced ticket counter to {max_id}")
 
-    # ── Review operations ─────────────────────────────────────
 
     async def insert_review(self, ticket_id: int, guild_id: int, staff_id: int, rating: int):
         async with self.lock:
@@ -268,7 +262,6 @@ class TicketDB:
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
 
-    # ── JSON transcript backup ────────────────────────────────
 
     def get_ticket_path(self, guild_id: int, ticket_id: int) -> Path:
         return self.tickets_dir / str(guild_id) / f"{ticket_id}.json"
@@ -280,9 +273,6 @@ class TicketDB:
         path.write_text(json.dumps(ticket_data, indent=4), encoding="utf-8")
 
 
-# ---------------------------------------------------------------------------
-# UI components
-# ---------------------------------------------------------------------------
 class TicketSelect(discord.ui.Select):
     def __init__(self, panel_id: int, options_data: List[dict]):
         self.panel_id = panel_id
@@ -417,7 +407,7 @@ class TicketTransferView(discord.ui.View):
 class TicketRatingView(ui.LayoutView):
     def __init__(self, ticket_id: str = "0", staff_id: int = None, guild_id: int = 0,
                  *, guild_name: str = "", guild_icon: str = None):
-        super().__init__(timeout=86400)  # 24 hours
+        super().__init__(timeout=86400)
         self.ticket_id = ticket_id
         self.staff_id = staff_id
         self.guild_id = guild_id
@@ -667,9 +657,6 @@ class TicketCloseView(discord.ui.View):
         await interaction.response.send_message("Select a reason for closing this ticket:", view=TicketCloseReasonView(), ephemeral=True)
 
 
-# ---------------------------------------------------------------------------
-# Main Cog
-# ---------------------------------------------------------------------------
 class TicketCog(commands.Cog, name="TicketCog"):
     ticket = app_commands.Group(name="ticket", description="Ticket management commands")
     option = app_commands.Group(name="option", description="Manage ticket options", parent=ticket)
@@ -680,8 +667,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
         self.db = TicketDB(self.base_data_path)
         self.bot.loop.create_task(self._init())
 
-        # In-memory mirror of data["server_config"], refreshed on every save
-        # so permission checks stay synchronous (no disk read per-interaction).
         self.server_configs: Dict[str, dict] = {}
 
         self.auto_permission_repair.start()
@@ -696,8 +681,8 @@ class TicketCog(commands.Cog, name="TicketCog"):
         await self.db.sync_counter()
         data = await self.db.get_config()
         self.server_configs = data.get("server_config", {})
-        self.bot.add_view(TicketCloseView())       # keep for old messages
-        self.bot.add_view(TicketControlsView())    # keep for old messages
+        self.bot.add_view(TicketCloseView())
+        self.bot.add_view(TicketControlsView())
         self.bot.add_view(TicketOpenLayout())
         self.bot.add_view(TicketClosedLayout())
         self.bot.add_view(TicketTransferView())
@@ -966,8 +951,8 @@ class TicketCog(commands.Cog, name="TicketCog"):
             options = [opt for opt in data.get("options", {}).values() if str(opt["panel_id"]) == str(pid)]
 
             if panel["type"] == "dropdown":
-                self.bot.add_view(TicketPanelView(int(pid), options))  # compat for old messages
-                self.bot.add_view(TicketPanelLayout(int(pid), options))  # V2 messages
+                self.bot.add_view(TicketPanelView(int(pid), options))
+                self.bot.add_view(TicketPanelLayout(int(pid), options))
             elif panel["type"] == "button":
                 self.bot.add_view(TicketPanelLayout(
                     int(pid), options, panel_type="button",
@@ -982,7 +967,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
             if interaction.response.is_done():
                 return
 
-            # Handle Dropdowns (buttons have their own callbacks)
             if custom_id.startswith("ticket_panel_"):
                 if not interaction.data.get("values"):
                     return
@@ -991,16 +975,14 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
                 await interaction.response.defer(ephemeral=True)
 
-                # Refresh the panel view to clear the selection (so user can click it again later)
                 data = await self.db.get_config()
                 options = [opt for opt in data.get("options", {}).values() if str(opt["panel_id"]) == str(panel_id)]
                 if options:
                     try:
-                        # Reconstruct from the sent message (works for both V2 and classic panels)
                         fresh = discord.ui.LayoutView.from_message(interaction.message, timeout=None)
                         await interaction.message.edit(view=fresh)
                     except Exception:
-                        pass  # non-fatal — panel will still work next click
+                        pass
 
                 await self.create_ticket(interaction, panel_id, option_id)
 
@@ -1021,9 +1003,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
     async def before_repair(self):
         await self.bot.wait_until_ready()
 
-    # -------------------------------------------------------------------
-    # Setup command (top-level — one command configures everything)
-    # -------------------------------------------------------------------
     @app_commands.command(name="setup", description="One-command setup: panel, categories, roles, and channels for your ticket system.")
     @app_commands.describe(
         panel_name="Name of your ticket panel (e.g. Support)",
@@ -1090,7 +1069,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
             deferred = True
             guild = interaction.guild
 
-            # Check permissions
             perms = guild.me.guild_permissions
             if not perms.manage_channels or not perms.manage_roles:
                 missing = []
@@ -1134,7 +1112,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                     pass
                 cfg["escalation_channel_id"] = escalation_channel.id
 
-            # Handle Transcript Channel
             if transcript_channel:
                 try:
                     await transcript_channel.set_permissions(guild.me, view_channel=True, send_messages=True, read_message_history=True, manage_messages=True)
@@ -1157,7 +1134,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                         return await interaction.followup.send("❌ I do not have permission to create the transcript channel. Please ensure I have 'Manage Channels'.", ephemeral=True)
 
             if mode == "channel":
-                # Handle Closed Category
                 if closed_category:
                     try:
                         await closed_category.set_permissions(guild.me, view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
@@ -1180,7 +1156,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                         except discord.Forbidden:
                             return await interaction.followup.send("❌ I do not have permission to create the 'Closed Tickets' category.", ephemeral=True)
 
-                # Handle Open Category
                 if not category:
                     overwrites_cat = {
                         guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -1194,7 +1169,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                     except discord.Forbidden:
                         return await interaction.followup.send("❌ I do not have permission to create the ticket category.", ephemeral=True)
                 else:
-                    # If an existing category was provided, ensure the bot has access
                     try:
                         await category.set_permissions(guild.me, view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
                     except:
@@ -1241,7 +1215,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 except Exception:
                     pass
 
-            # Create Panel
             data["counters"]["panels"] += 1
             panel_id = str(data["counters"]["panels"])
 
@@ -1253,12 +1226,11 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 "id": int(panel_id),
                 "name": panel_name,
                 "category_id": category.id if mode == "channel" else None,
-                "channel_id": interaction.channel.id,  # Panel message channel
+                "channel_id": interaction.channel.id,
                 "type": p_type,
                 "message_id": None
             }
 
-            # Create default option(s)
             t_label = template.value if template else "General Support"
             options_to_add = []
 
@@ -1297,7 +1269,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
             await self._save_config(data)
 
-            # Send V2 Panel
             thumb = thumbnail_url or (interaction.guild.icon.url if interaction.guild.icon else None)
             if p_type == "dropdown":
                 panel_layout = TicketPanelLayout(
@@ -1340,7 +1311,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
         options = [opt for opt in data["options"].values() if str(opt["panel_id"]) == str(panel_id)]
 
-        # Use the stored channel_id if available, otherwise fallback to search
         channel_id = panel.get("channel_id")
         message = None
 
@@ -1353,12 +1323,10 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 pass
 
         if not message:
-            # Fallback search if the stored ID failed or is missing
             for ch in guild.text_channels:
                 try:
                     message = await ch.fetch_message(panel["message_id"])
                     if message:
-                        # Update the config with the found channel ID for next time
                         panel["channel_id"] = ch.id
                         await self._save_config(data)
                         break
@@ -1385,14 +1353,10 @@ class TicketCog(commands.Cog, name="TicketCog"):
             await self.create_ticket(interaction, panel_id, option_id)
         return callback
 
-    # -------------------------------------------------------------------
-    # Ticket creation
-    # -------------------------------------------------------------------
     async def create_ticket(self, interaction: discord.Interaction, panel_id: int, option_id: int, reason: Optional[str] = None):
         try:
             guild = interaction.guild
 
-            # --- Anti-Spam / Limit Checks ---
             data = await self.db.get_config()
             server_cfg = data.get("server_config", {}).get(str(guild.id), {})
             max_tickets = server_cfg.get("max_tickets", 3)
@@ -1417,7 +1381,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 if diff < cooldown_sec:
                     remaining = int(cooldown_sec - diff)
                     return await interaction.followup.send(f"⏳ **Cooldown active:** Please wait `{remaining//60}m {remaining%60}s` before opening another ticket.", ephemeral=True)
-            # --------------------------------
 
             panel = data["panels"].get(str(panel_id))
             if not panel:
@@ -1427,11 +1390,9 @@ class TicketCog(commands.Cog, name="TicketCog"):
             opt = data["options"].get(str(option_id))
             label = opt["label"] if opt else "ticket"
 
-            # Increment ticket counter
             data["counters"]["tickets"] += 1
             ticket_id = data["counters"]["tickets"]
 
-            # Clean label for channel name (e.g. "Billing Support" -> "billing")
             clean_label = label.lower().split()[0].replace(' ', '-')
             username = interaction.user.name.lower().replace(' ', '-')
             chan_name = f"🎫-{clean_label}-{username}"
@@ -1479,7 +1440,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                             category = await guild.create_category(name=overflow_name, overwrites=category.overwrites)
                             break
 
-                # Start with category overwrites
                 overwrites = {}
                 if category:
                     for target, overwrite in category.overwrites.items():
@@ -1492,7 +1452,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 overwrites[interaction.user]   = _ticket_perms
                 overwrites[guild.me]           = _bot_perms
 
-                # This guild's configured staff/admin roles all get ticket access
                 for role_id in (staff_role_id, server_cfg.get("staff2_role_id"), server_cfg.get("admin_role_id")):
                     if not role_id:
                         continue
@@ -1508,7 +1467,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 try:
                     ticket_channel = await guild.create_text_channel(name=chan_name, category=category, overwrites=overwrites)
                 except discord.Forbidden:
-                    # Silently attempt to repair
                     await self.auto_repair_guild_permissions(interaction.guild)
                     await interaction.followup.send("❌ I am missing the 'Manage Channels' permission to create this ticket. I've attempted an auto-repair, please try again in a moment.", ephemeral=True)
                     raise
@@ -1599,9 +1557,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
             await self.report_error("Ticket Creation", e, interaction)
             await interaction.followup.send("❌ An internal error occurred while creating your ticket. The developers have been notified.", ephemeral=True)
 
-    # -------------------------------------------------------------------
-    # Message logging
-    # -------------------------------------------------------------------
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot:
@@ -1631,9 +1586,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
         await self.db.save_json_backup(message.guild.id, ticket)
         self._mark_dirty(message.channel.id)
 
-    # -------------------------------------------------------------------
-    # Shared close flow (used by both manual close and inactivity)
-    # -------------------------------------------------------------------
     async def _run_close_flow(self, channel: discord.TextChannel, ticket: dict, reason: str = ""):
         """Shared close logic."""
         try:
@@ -1649,7 +1601,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
             self.ticket_cache[channel.id] = ticket
             self._mark_dirty(channel.id)
 
-            # Send close message FIRST while everyone still has access
             closing_text = reason or "No specific reason provided."
             await channel.send(view=TicketClosedLayout(
                 ticket_id=ticket["id"],
@@ -1657,7 +1608,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 reason=closing_text,
             ))
 
-            # Rename channel
             creator = guild.get_member(ticket["creator_id"]) or await self.bot.fetch_user(ticket["creator_id"])
             creator_name = creator.name.lower().replace(' ', '-') if creator else "unknown"
             try:
@@ -1677,7 +1627,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 except:
                     pass
             else:
-                # Remove creator permissions
                 try:
                     creator_member = guild.get_member(ticket["creator_id"])
                     if creator_member:
@@ -1685,7 +1634,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 except:
                     pass
 
-                # Move to closed category
                 try:
                     cfg = self._cfg(guild.id)
                     closed_cat_id = cfg.get("closed_category_id")
@@ -1696,7 +1644,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 except:
                     pass
 
-            # Send rating DM to the ticket creator
             try:
                 creator = guild.get_member(ticket["creator_id"]) or await self.bot.fetch_user(ticket["creator_id"])
                 if creator:
@@ -1794,7 +1741,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
             cfg = self._cfg(interaction.guild.id)
 
-            # Send Transcript
             tc_id = cfg.get("transcript_channel_id")
             if tc_id:
                 tc = interaction.guild.get_channel(tc_id) or await self.bot.fetch_channel(tc_id)
@@ -1864,7 +1810,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
             self._mark_dirty(channel.id)
             self.bot.ui.append_log("", "OK", f"ticket: reopened #{ticket_id} by {interaction.user} in {interaction.guild.name}")
 
-            # Rename back to original format
             data = await self.db.get_config()
             opt = data["options"].get(str(ticket["option_id"]))
             label = opt["label"] if opt else "ticket"
@@ -1902,9 +1847,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
             await self.report_error("Ticket Reopening", e, interaction)
             await interaction.followup.send("❌ Error reopening ticket.")
 
-    # -------------------------------------------------------------------
-    # Transcript command
-    # -------------------------------------------------------------------
     @ticket.command(name="transcript", description="Generate a transcript of the current ticket.")
     async def transcript_cmd(self, interaction: discord.Interaction):
         ticket = self.ticket_cache.get(interaction.channel.id)
@@ -1926,9 +1868,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
         await interaction.response.send_message(file=discord.File(file_path), ephemeral=True)
 
-    # -------------------------------------------------------------------
-    # Ticket management commands
-    # -------------------------------------------------------------------
     @ticket.command(name="add", description="Add a member to the current ticket.")
     @app_commands.describe(member="The member to add")
     async def ticket_add(self, interaction: discord.Interaction, member: discord.Member):
@@ -1962,7 +1901,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 data = await self.db.get_config()
             server_cfg = data.get("server_config", {}).get(str(guild.id), {})
 
-            # Helper to set standard bot permissions
             async def fix_perms(channel):
                 if not channel: return
                 try:
@@ -1977,22 +1915,18 @@ class TicketCog(commands.Cog, name="TicketCog"):
                         )
                 except: pass
 
-            # 1. Transcript Channel
             tc_id = server_cfg.get("transcript_channel_id")
             if tc_id:
                 await fix_perms(guild.get_channel(tc_id) or await self.bot.fetch_channel(tc_id))
 
-            # 2. Closed Category
             cc_id = server_cfg.get("closed_category_id")
             if cc_id:
                 await fix_perms(guild.get_channel(cc_id) or await self.bot.fetch_channel(cc_id))
 
-            # 3. Escalation Channel
             esc_id = server_cfg.get("escalation_channel_id")
             if esc_id:
                 await fix_perms(guild.get_channel(esc_id) or await self.bot.fetch_channel(esc_id))
 
-            # 4. Panel Categories
             for pid, panel in data.get("panels", {}).items():
                 cat_id = panel.get("category_id")
                 if cat_id:
@@ -2002,8 +1936,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                             await fix_perms(cat)
                     except: pass
 
-            # 5. Active Ticket Channels (threads repair nothing here — access is
-            # via membership + role-level Manage Threads, not per-channel overwrites)
             guild_tickets_dir = self.db.tickets_dir / str(guild.id)
             if guild_tickets_dir.exists():
                 for ticket_file in guild_tickets_dir.glob("*.json"):
@@ -2062,9 +1994,7 @@ class TicketCog(commands.Cog, name="TicketCog"):
             creator = interaction.guild.get_member(ticket["creator_id"])
             await self._grant_access(interaction.channel, creator)
 
-            # Respond first — interaction.message.edit() consumes the response slot
             await interaction.response.send_message(f"✅ You have claimed this ticket, {interaction.user.mention}!", ephemeral=False)
-            # Update V2 layout message to reflect claimed status
             try:
                 fresh = discord.ui.LayoutView.from_message(interaction.message, timeout=None)
                 for item in fresh.children:
@@ -2078,12 +2008,10 @@ class TicketCog(commands.Cog, name="TicketCog"):
                         )
                         break
                 await interaction.message.edit(view=fresh)
-                # from_message() views have no callbacks — re-bind the real
-                # layout to this message so the other buttons keep working
                 self.bot.add_view(TicketOpenLayout(), message_id=interaction.message.id)
             except Exception:
                 pass
-            self.ticket_cache[interaction.channel.id] = ticket  # Update cache
+            self.ticket_cache[interaction.channel.id] = ticket
         except Exception as e:
             await self.report_error("Ticket Claim", e, interaction)
             await interaction.response.send_message("❌ Error claiming ticket.", ephemeral=True)
@@ -2101,7 +2029,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
             repaired = []
             failed = []
 
-            # 1. Transcript Channel
             tc_id = server_cfg.get("transcript_channel_id")
             if tc_id:
                 try:
@@ -2112,7 +2039,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 except:
                     failed.append("Transcript Channel (Not found or No Perms)")
 
-            # 2. Closed Category
             cc_id = server_cfg.get("closed_category_id")
             if cc_id:
                 try:
@@ -2123,7 +2049,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 except:
                     failed.append("Closed Category (Not found or No Perms)")
 
-            # 3. Panel Categories
             for pid, panel in data.get("panels", {}).items():
                 cat_id = panel.get("category_id")
                 if cat_id:
@@ -2197,7 +2122,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
             cfg = self._cfg(interaction.guild.id)
 
-            # If the ticket was claimed, remove the claimant's explicit access (unless they are Owner/main staff)
             if ticket.get("claimant_id"):
                 old_claimant = interaction.guild.get_member(ticket["claimant_id"])
                 if old_claimant and old_claimant.id not in OWNER_IDS:
@@ -2226,9 +2150,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
             if not interaction.response.is_done():
                 await interaction.response.send_message("❌ Error transferring ticket.", ephemeral=True)
 
-    # -------------------------------------------------------------------
-    # Ticket Option management
-    # -------------------------------------------------------------------
     @option.command(name="add", description="Add a new option to a ticket panel.")
     @app_commands.describe(panel_id="Panel ID number", label="Button label", emoji="Optional emoji", description="Optional description")
     async def option_add(self, interaction: discord.Interaction, panel_id: int, label: str, emoji: str = None, description: str = None):
@@ -2277,9 +2198,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
         await self.refresh_panel_message(interaction.guild, opt["panel_id"])
         await interaction.response.send_message(f"✅ Option `{option_id}` removed.", ephemeral=True)
 
-    # -------------------------------------------------------------------
-    # Panel resend command
-    # -------------------------------------------------------------------
     @ticket.command(name="panel", description="Re-send a ticket panel to the current channel.")
     @app_commands.describe(panel_id="Panel ID to resend")
     async def ticket_panel_resend(self, interaction: discord.Interaction, panel_id: int):
@@ -2307,9 +2225,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
         await self._save_config(data)
         await interaction.response.send_message(f"✅ Panel re-sent to {interaction.channel.mention}.", ephemeral=True)
 
-    # -------------------------------------------------------------------
-    # Ticket rename command
-    # -------------------------------------------------------------------
     @ticket.command(name="rename", description="Rename the current ticket channel.")
     @app_commands.describe(name="New channel name")
     async def ticket_rename(self, interaction: discord.Interaction, name: str):
@@ -2322,9 +2237,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
         await interaction.channel.edit(name=clean)
         await interaction.response.send_message(f"✅ Channel renamed to `{clean}`.", ephemeral=True)
 
-    # -------------------------------------------------------------------
-    # Close command (staff fallback when buttons don't work)
-    # -------------------------------------------------------------------
     @ticket.command(name="close", description="Close the current ticket (staff fallback).")
     @app_commands.describe(reason="Optional closing reason")
     async def close_command(self, interaction: discord.Interaction, reason: str = None):
@@ -2336,9 +2248,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
             return await interaction.response.send_message("❌ This command is restricted to the ticket creator, staff, or owners.", ephemeral=True)
         await self.close_ticket_process(interaction, reason or "Closed via /close command.")
 
-    # -------------------------------------------------------------------
-    # Ticket config command
-    # -------------------------------------------------------------------
     @ticket.command(name="config", description="Configure ticket settings.")
     @app_commands.describe(
         max_tickets="Max open tickets per user (0 = unlimited)",
@@ -2378,9 +2287,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
         )
         await interaction.response.send_message(f"✅ {' | '.join(changes) if changes else 'No changes.'}\n{current}", ephemeral=True)
 
-    # -------------------------------------------------------------------
-    # Bulk transcript
-    # -------------------------------------------------------------------
     @ticket.command(name="bulk_transcript", description="Export all ticket transcripts as a single file.")
     async def ticket_bulk_transcript(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -2410,9 +2316,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
         await interaction.followup.send(file=discord.File(temp), ephemeral=True)
         temp.unlink(missing_ok=True)
 
-    # -------------------------------------------------------------------
-    # Public reviews command
-    # -------------------------------------------------------------------
     @app_commands.command(name="reviews", description="See public support ratings and reviews.")
     async def reviews(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -2456,8 +2359,5 @@ class TicketCog(commands.Cog, name="TicketCog"):
             await interaction.followup.send("❌ An error occurred while fetching reviews.", ephemeral=True)
 
 
-# ---------------------------------------------------------------------------
-# Setup function
-# ---------------------------------------------------------------------------
 async def setup(bot: commands.Bot):
     await bot.add_cog(TicketCog(bot))
