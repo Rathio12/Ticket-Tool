@@ -115,7 +115,7 @@ intents.members = True
 intents.messages = True
 intents.reactions = True
 
-bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents)
+bot = commands.Bot(command_prefix=BOT_PREFIX, intents=intents, help_command=None)
 bot.owner_ids = set(OWNER_IDS)
 
 
