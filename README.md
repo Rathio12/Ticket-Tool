@@ -135,7 +135,7 @@ test server instead.
 | `/ticket bulk_transcript` | Export all ticket transcripts for the server | Staff |
 | `/ticket close` | Close the current ticket (fallback if buttons fail) | Creator/Staff |
 | `/reviews` | View public support rating stats | Everyone |
-| `/help` | List every available command | Everyone |
+| `/help` | List every available command | Staff |
 
 "Staff" means: server Administrators, the role(s) set via `/setup staff_role:` /
 `staff_role_2:`, or a bot operator listed in `OWNER_IDS`.
