@@ -1,6 +1,6 @@
 <div align="center">
 
-![Ticket Tool](assets/banner.svg)
+![Ticket Tool](assets/banner.png)
 
 ![discord.py](https://img.shields.io/badge/discord.py-2.6%2B-5865F2?logo=discord&logoColor=white)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
