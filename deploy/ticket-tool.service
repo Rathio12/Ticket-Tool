@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=%i
-WorkingDirectory=/opt/ticket-tool
-ExecStart=/usr/bin/python3 /opt/ticket-tool/main.py
+User=__USER__
+WorkingDirectory=__WORKDIR__
+ExecStart=/usr/bin/python3 __WORKDIR__/main.py
 Restart=on-failure
 RestartSec=10
 

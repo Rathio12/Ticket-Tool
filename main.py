@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import logging
+import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,7 +62,8 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
-from core.config import DISCORD_TOKEN, BOT_PREFIX, OWNER_IDS, DEV_GUILD_ID
+from core.config import DISCORD_TOKEN, BOT_PREFIX, OWNER_IDS, DEV_GUILD_ID, RESTART_LOG_CHANNEL_ID
+from core.design import Colors, PanelView
 
 if not DISCORD_TOKEN:
     raise RuntimeError("DISCORD_TOKEN not set in .env")
@@ -127,6 +129,72 @@ bot.file_log = _file_log
 
 bot_start_time = datetime.now(timezone.utc)
 DATA_DIR = Path(__file__).parent / "Data"
+DATA_DIR.mkdir(exist_ok=True)
+RESTART_STATE_PATH = DATA_DIR / "restart_state.json"
+
+
+def _read_restart_state() -> dict:
+    try:
+        return json.loads(RESTART_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_restart_state(status: str, **extra):
+    try:
+        payload = {"status": status, "at": datetime.now(timezone.utc).isoformat(), **extra}
+        RESTART_STATE_PATH.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception:
+        pass
+
+
+async def _send_to_restart_channel(**panel_kwargs):
+    if not RESTART_LOG_CHANNEL_ID:
+        return
+    channel = bot.get_channel(RESTART_LOG_CHANNEL_ID)
+    if not channel:
+        try:
+            channel = await bot.fetch_channel(RESTART_LOG_CHANNEL_ID)
+        except Exception:
+            return
+    try:
+        await channel.send(view=PanelView(**panel_kwargs))
+    except Exception:
+        pass
+
+
+def _recent_error_lines(limit: int = 8) -> str:
+    path = Path("debug.log")
+    if not path.exists():
+        return ""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        return "\n".join(lines[-limit:])
+    except Exception:
+        return ""
+
+
+async def _report_startup_state():
+    prev = _read_restart_state()
+    status = prev.get("status")
+    if status == "clean_shutdown":
+        await _send_to_restart_channel(
+            title="✅ Restart complete",
+            description="The bot shut down cleanly and is back online.",
+            color=Colors.SUCCESS,
+            timestamp=True,
+        )
+    elif status == "running":
+        tail = _recent_error_lines()
+        fields = [("Last logged errors", f"```\n{tail}\n```", False)] if tail else []
+        await _send_to_restart_channel(
+            title="⚠️ Restarted after an unclean shutdown",
+            description="The bot came back online, but the previous run did not exit cleanly (crash, OOM kill, or a forced stop).",
+            fields=fields,
+            color=Colors.WARNING,
+            timestamp=True,
+        )
+    _write_restart_state("running")
 
 
 def _count_tickets_from_json():
@@ -193,6 +261,11 @@ bot.get_status_lines = _get_status_lines
 @bot.event
 async def on_ready():
     bot.ui.append_log("", "OK", f"Discord connected as {bot.user} ({bot.user.id})")
+
+    if not getattr(bot, "_startup_reported", False):
+        bot._startup_reported = True
+        await _report_startup_state()
+
     try:
         all_local   = bot.tree.get_commands()
         total_local = _count_commands(all_local)
@@ -263,10 +336,32 @@ def setup_discord_logger(log_filename="bot_debug.log"):
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+async def _graceful_shutdown():
+    bot.ui.append_log("", "WARN", "Shutdown signal received — closing cleanly...")
+    if bot.is_ready():
+        await _send_to_restart_channel(
+            title="🔁 Restarting",
+            description="A restart was requested. The bot is shutting down cleanly and will be back shortly.",
+            color=Colors.WARNING,
+            timestamp=True,
+        )
+    _write_restart_state("clean_shutdown")
+    await bot.close()
+
+
+def _install_signal_handlers(loop: asyncio.AbstractEventLoop):
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, lambda: asyncio.ensure_future(_graceful_shutdown()))
+        except (NotImplementedError, AttributeError):
+            pass
+
+
 async def main():
     setup_discord_logger()
     bot.ui.append_log("", "INFO", "Starting Ticket Tool…")
     bot.ui.append_log("", "INFO", "Connecting to Discord…")
+    _install_signal_handlers(asyncio.get_running_loop())
     async with bot:
         await load_cogs()
         await bot.start(DISCORD_TOKEN)

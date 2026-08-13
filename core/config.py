@@ -31,6 +31,7 @@ DEV_GUILD_ID = _parse_id(os.getenv("DEV_GUILD_ID", ""))
 # Optional: a single channel (in the bot operator's own server) that receives
 # uncaught errors that can't be attributed to a specific guild's error channel.
 BOT_ERROR_CHANNEL_ID = _parse_id(os.getenv("BOT_ERROR_CHANNEL_ID", ""))
+RESTART_LOG_CHANNEL_ID = _parse_id(os.getenv("RESTART_LOG_CHANNEL_ID", ""))
 
 PRESENCE_TEXT = os.getenv("PRESENCE_TEXT", "for /ticket setup")
 

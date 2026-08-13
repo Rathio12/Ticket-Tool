@@ -5,79 +5,63 @@ needed. It creates `./venv`, installs `requirements.txt` into it, then re-execs 
 inside that venv. Because it uses `os.execv()` (not a subprocess fork), the process ID
 stays the same throughout, so systemd tracks it correctly as a `Type=simple` service.
 
-## 1. Copy the project to the server
+## Quick install
 
 ```
-sudo mkdir -p /opt/ticket-tool
-sudo cp -r . /opt/ticket-tool
-cd /opt/ticket-tool
-cp .env.example .env   # then fill in DISCORD_TOKEN etc.
+cd /opt/ticket-tool          # wherever you cloned the repo
+cp .env.example .env         # fill in DISCORD_TOKEN etc. before continuing
+sudo bash deploy/install.sh
 ```
 
-## 2. Install the service
+That's it. The script:
+- writes `/etc/systemd/system/ticket-tool.service`, pointed at this exact directory and
+  run as whichever user invoked `sudo` (falls back to `root` if it can't tell)
+- installs `ticket-tool-restart.timer` + `.service`, which restarts the bot **daily at
+  04:00** (a few minutes of random jitter included so it doesn't line up exactly with
+  other scheduled jobs)
+- runs `daemon-reload` and enables + starts both units immediately
 
-Edit `ticket-tool.service` first if your path or user differs from the defaults
-(`/opt/ticket-tool`, run as your own user via `User=%i`).
-
-```
-sudo cp deploy/ticket-tool.service /etc/systemd/system/ticket-tool@.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now ticket-tool@youruser.service
-```
-
-(The `@` template lets one unit file run as any user — swap `youruser` for the actual
-account, or simplify by hardcoding `User=` in the unit and dropping the `@`.)
-
-Check it's alive:
+For a **weekly** restart (every Monday 04:00) instead of daily:
 
 ```
-sudo systemctl status ticket-tool@youruser.service
-journalctl -u ticket-tool@youruser.service -f
+sudo bash deploy/install.sh --weekly
 ```
 
-## 3. Scheduled restart (daily at 4am)
+Re-run `deploy/install.sh` any time to pick up a new project path or user — it's safe to
+run repeatedly, it just overwrites the same two unit files.
 
-Long-running bots benefit from a periodic clean restart (clears any slow memory creep,
-picks up host-level changes). This repo ships a `systemd` timer for it instead of cron —
-it survives reboots and logs to the same place as everything else.
-
-```
-sudo cp deploy/ticket-tool-restart.service /etc/systemd/system/
-sudo cp deploy/ticket-tool-restart.timer /etc/systemd/system/
-```
-
-If you templated the main service as `ticket-tool@youruser.service`, update the
-`ExecStart=` line in `ticket-tool-restart.service` to match before copying it over.
+## Checking it worked
 
 ```
-sudo systemctl daemon-reload
-sudo systemctl enable --now ticket-tool-restart.timer
-```
-
-Verify the schedule:
-
-```
+systemctl status ticket-tool.service
+journalctl -u ticket-tool.service -f
 systemctl list-timers ticket-tool-restart.timer
 ```
-
-### Daily vs. weekly
-
-The shipped timer restarts **daily at 04:00** (with a random 0–5 min jitter so it doesn't
-line up exactly with other cron/timer jobs). For a **weekly** restart instead — e.g. every
-Monday at 4am — edit the `OnCalendar=` line in `ticket-tool-restart.timer`:
-
-```
-OnCalendar=Mon *-*-* 04:00:00
-```
-
-Then `sudo systemctl daemon-reload && sudo systemctl restart ticket-tool-restart.timer`.
 
 ## Updating the bot
 
 ```
 cd /opt/ticket-tool
 git pull
-sudo systemctl restart ticket-tool@youruser.service
+sudo systemctl restart ticket-tool.service
 ```
 
 `Data/` (config, tickets, transcripts) lives outside git and is untouched by `git pull`.
+
+## Doing it by hand instead
+
+If you'd rather not run the install script, `ticket-tool.service` in this folder is a
+template — replace `__WORKDIR__` with the absolute path to the project and `__USER__`
+with the account to run it as, then:
+
+```
+sudo cp ticket-tool.service /etc/systemd/system/ticket-tool.service
+sudo cp ticket-tool-restart.service ticket-tool-restart.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now ticket-tool.service
+sudo systemctl enable --now ticket-tool-restart.timer
+```
+
+To switch the restart schedule manually, edit `OnCalendar=` in
+`/etc/systemd/system/ticket-tool-restart.timer` (`*-*-* 04:00:00` for daily,
+`Mon *-*-* 04:00:00` for weekly), then `sudo systemctl daemon-reload && sudo systemctl restart ticket-tool-restart.timer`.
