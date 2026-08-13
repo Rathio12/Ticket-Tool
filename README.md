@@ -31,6 +31,12 @@ team is actually **responding**, not just resolving:
 - **SLA visibility in the live report** — the self-updating stats panel shows average
   first-response time and how many closed tickets never got a reply at all, alongside the
   usual open/closed counts and top-staff leaderboard.
+- **Repeat-ticket detection** — if a user opens a ticket on the same topic they already
+  had closed recently, staff get an instant note in the new ticket linking the prior one
+  and its resolution — no digging through history to spot a repeat complaint.
+- **Channels or threads, your choice** — `/setup ticket_mode:` lets each server pick
+  between a classic separate-channel-per-ticket layout or private-thread tickets that
+  live inside one channel, whichever fits how the server is organized.
 - **Fully self-serve, zero code changes per server** — one `/setup` command configures
   everything; there is no bot-owner allowlist gating a server's ability to use it.
 - **No misbehaving timeouts** — every ticket button, panel, and dropdown is a persistent
@@ -111,12 +117,12 @@ test server instead.
 
 | Command | Description | Permission |
 |---|---|---|
-| `/setup` | One-command setup: panel, categories, roles, channels | Administrator |
+| `/setup` | One-command setup: panel, ticket mode (channels/threads), categories, roles, channels | Administrator |
 | `/ticket option add` | Add an option to an existing panel | Staff |
 | `/ticket option edit` | Edit a ticket option | Staff |
 | `/ticket option remove` | Remove an option from a panel | Staff |
 | `/ticket panel` | Re-send a panel to the current channel | Staff |
-| `/ticket config` | Configure max tickets, cooldown, auto-close, SLA reminder | Staff |
+| `/ticket config` | Configure max tickets, cooldown, auto-close, SLA reminder, repeat-ticket window | Staff |
 | `/ticket repair` | Audit and repair bot permissions | Staff |
 | `/ticket rename` | Rename the current ticket channel | Staff |
 | `/ticket add` | Add a member to the current ticket | Staff |
@@ -140,18 +146,6 @@ test server instead.
 | Transcript | Download the JSON transcript |
 | Reopen | Reopen a closed ticket |
 | Delete | Delete the channel and send the transcript |
-
-### Prefix Commands (`!`)
-
-| Command | Description | Permission |
-|---|---|---|
-| `!stats` | Ticket statistics for the current server | Guild admin / owner |
-| `!botstats` | Ticket statistics across every server | Bot owner |
-| `!status tt` | Runtime status dashboard | Guild admin / owner |
-| `!sync` | Force a global slash-command re-sync | Bot owner |
-| `!report_channel #channel` | Set the live stats-report channel for this server | Guild admin |
-| `!report` | Force-refresh the stats report now | Guild admin |
-| `!test_limits` / `!cleanup_test` | Channel-limit load test / cleanup | Guild admin / owner |
 
 ## Project Structure
 

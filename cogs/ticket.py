@@ -886,6 +886,65 @@ class TicketCog(commands.Cog, name="TicketCog"):
         except Exception as send_error:
             print(f"Failed to send error report to notify-channel: {send_error}")
 
+    async def _grant_access(self, channel, member: discord.abc.Snowflake):
+        """Give a member access to a ticket, whether it's a channel or a thread."""
+        if member is None:
+            return
+        try:
+            if isinstance(channel, discord.Thread):
+                await channel.add_user(member)
+            else:
+                await channel.set_permissions(member, view_channel=True, send_messages=True, read_message_history=True)
+        except Exception:
+            pass
+
+    async def _revoke_access(self, channel, member: discord.abc.Snowflake):
+        """Remove a member's access to a ticket, whether it's a channel or a thread."""
+        if member is None:
+            return
+        try:
+            if isinstance(channel, discord.Thread):
+                await channel.remove_user(member)
+            else:
+                await channel.set_permissions(member, overwrite=None)
+        except Exception:
+            pass
+
+    async def _grant_role_access(self, channel, role: Optional[discord.Role]):
+        if role is None:
+            return
+        try:
+            if isinstance(channel, discord.Thread):
+                parent = channel.parent
+                if parent:
+                    await parent.set_permissions(role, view_channel=True, manage_threads=True, send_messages_in_threads=True, read_message_history=True)
+            else:
+                await channel.set_permissions(role, view_channel=True, send_messages=True, read_message_history=True)
+        except Exception:
+            pass
+
+    async def _find_repeat_ticket(self, guild_id: int, creator_id: int, option_id: int, hours: int = 72) -> Optional[dict]:
+        if not hours:
+            return None
+        closed = await self.db.get_closed_tickets(guild_id)
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+        best = None
+        for t in closed:
+            if t.get("creator_id") != creator_id or t.get("option_id") != option_id:
+                continue
+            closed_at = t.get("closed_at")
+            if not closed_at:
+                continue
+            try:
+                dt = datetime.datetime.fromisoformat(closed_at)
+            except Exception:
+                continue
+            if dt < cutoff:
+                continue
+            if not best or dt > best[0]:
+                best = (dt, t)
+        return best[1] if best else None
+
     async def safe_send(self, channel, **kwargs):
         """Sends a message to a channel, attempting a repair if permissions are missing."""
         if not channel: return None
@@ -969,9 +1028,11 @@ class TicketCog(commands.Cog, name="TicketCog"):
     @app_commands.describe(
         panel_name="Name of your ticket panel (e.g. Support)",
         custom_text="Description text on the panel",
+        ticket_mode="Open tickets as separate channels, or as private threads in one channel",
         staff_role="Role that gets access to every ticket and can claim/manage them",
         ping_role="Role to ping when a ticket opens (defaults to staff_role)",
-        category="Category where OPEN tickets will go",
+        category="[Channel mode] Category where OPEN tickets will go",
+        thread_channel="[Thread mode] Channel private ticket threads are created in",
         panel_type="dropdown or button (default: dropdown)",
         template="Choose a pre-defined template for your first option",
         admin_role="Higher-up role used for escalation",
@@ -981,12 +1042,16 @@ class TicketCog(commands.Cog, name="TicketCog"):
         error_channel="Optional channel for internal error reports",
         thumbnail_url="Custom image URL for the panel thumbnail",
         transcript_channel="Optional existing channel for transcripts",
-        closed_category="Optional existing category for closed tickets"
+        closed_category="[Channel mode] Optional existing category for closed tickets"
     )
     @app_commands.choices(
         panel_type=[
             app_commands.Choice(name="Dropdown Menu", value="dropdown"),
             app_commands.Choice(name="Buttons", value="button")
+        ],
+        ticket_mode=[
+            app_commands.Choice(name="Channels (a separate channel per ticket)", value="channel"),
+            app_commands.Choice(name="Threads (a private thread per ticket, in one channel)", value="thread"),
         ],
         template=[
             app_commands.Choice(name="General Support",          value="General Support"),
@@ -1003,9 +1068,11 @@ class TicketCog(commands.Cog, name="TicketCog"):
         interaction: discord.Interaction,
         panel_name: str = "Support Tickets",
         custom_text: str = "Select an option below to open a ticket.",
+        ticket_mode: app_commands.Choice[str] = None,
         staff_role: discord.Role = None,
         ping_role: discord.Role = None,
         category: discord.CategoryChannel = None,
+        thread_channel: discord.TextChannel = None,
         panel_type: app_commands.Choice[str] = None,
         template: app_commands.Choice[str] = None,
         admin_role: discord.Role = None,
@@ -1036,6 +1103,11 @@ class TicketCog(commands.Cog, name="TicketCog"):
             if str(guild.id) not in data["server_config"]:
                 data["server_config"][str(guild.id)] = {}
             cfg = data["server_config"][str(guild.id)]
+
+            mode = ticket_mode.value if ticket_mode else cfg.get("ticket_mode", "channel")
+            if mode not in ("channel", "thread"):
+                mode = "channel"
+            cfg["ticket_mode"] = mode
 
             if staff_role:
                 cfg["staff_role_id"] = staff_role.id
@@ -1084,47 +1156,84 @@ class TicketCog(commands.Cog, name="TicketCog"):
                     except discord.Forbidden:
                         return await interaction.followup.send("❌ I do not have permission to create the transcript channel. Please ensure I have 'Manage Channels'.", ephemeral=True)
 
-            # Handle Closed Category
-            if closed_category:
-                try:
-                    await closed_category.set_permissions(guild.me, view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
-                except:
-                    pass
-                cfg["closed_category_id"] = closed_category.id
-            else:
-                existing_id = cfg.get("closed_category_id")
-                if not existing_id or not guild.get_channel(existing_id):
-                    overwrites_closed = {
-                        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            if mode == "channel":
+                # Handle Closed Category
+                if closed_category:
+                    try:
+                        await closed_category.set_permissions(guild.me, view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
+                    except:
+                        pass
+                    cfg["closed_category_id"] = closed_category.id
+                else:
+                    existing_id = cfg.get("closed_category_id")
+                    if not existing_id or not guild.get_channel(existing_id):
+                        overwrites_closed = {
+                            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
+                        }
+                        if ping_role:
+                            overwrites_closed[ping_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+                        try:
+                            cc = await guild.create_category("🔒 CLOSED TICKETS", overwrites=overwrites_closed)
+                            cfg["closed_category_id"] = cc.id
+                        except discord.Forbidden:
+                            return await interaction.followup.send("❌ I do not have permission to create the 'Closed Tickets' category.", ephemeral=True)
+
+                # Handle Open Category
+                if not category:
+                    overwrites_cat = {
+                        guild.default_role: discord.PermissionOverwrite(view_channel=False),
                         guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
                     }
                     if ping_role:
-                        overwrites_closed[ping_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+                        overwrites_cat[ping_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
 
                     try:
-                        cc = await guild.create_category("🔒 CLOSED TICKETS", overwrites=overwrites_closed)
-                        cfg["closed_category_id"] = cc.id
+                        category = await guild.create_category(f"🎫 {panel_name}", overwrites=overwrites_cat)
                     except discord.Forbidden:
-                        return await interaction.followup.send("❌ I do not have permission to create the 'Closed Tickets' category.", ephemeral=True)
-
-            # Handle Open Category
-            if not category:
-                overwrites_cat = {
-                    guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                    guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
-                }
-                if ping_role:
-                    overwrites_cat[ping_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
-
-                try:
-                    category = await guild.create_category(f"🎫 {panel_name}", overwrites=overwrites_cat)
-                except discord.Forbidden:
-                    return await interaction.followup.send("❌ I do not have permission to create the ticket category.", ephemeral=True)
+                        return await interaction.followup.send("❌ I do not have permission to create the ticket category.", ephemeral=True)
+                else:
+                    # If an existing category was provided, ensure the bot has access
+                    try:
+                        await category.set_permissions(guild.me, view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
+                    except:
+                        pass
             else:
-                # If an existing category was provided, ensure the bot has access
+                staff_ids_for_perms = [r for r in (cfg.get("staff_role_id"), cfg.get("staff2_role_id"), cfg.get("admin_role_id")) if r]
+                if thread_channel:
+                    parent = thread_channel
+                else:
+                    existing_id = cfg.get("thread_channel_id")
+                    parent = guild.get_channel(existing_id) if existing_id else None
+                    if not parent:
+                        try:
+                            parent = await guild.create_text_channel(f"🎫-{panel_name.lower().replace(' ', '-')}")
+                        except discord.Forbidden:
+                            return await interaction.followup.send("❌ I do not have permission to create the ticket thread channel.", ephemeral=True)
+
+                cfg["thread_channel_id"] = parent.id
                 try:
-                    await category.set_permissions(guild.me, view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
-                except:
+                    overwrites_thread = {
+                        guild.default_role: discord.PermissionOverwrite(
+                            view_channel=True, send_messages=False,
+                            create_private_threads=False, create_public_threads=False,
+                        ),
+                        guild.me: discord.PermissionOverwrite(
+                            view_channel=True, send_messages=True, read_message_history=True,
+                            manage_channels=True, manage_threads=True, create_private_threads=True,
+                            send_messages_in_threads=True,
+                        ),
+                    }
+                    for role_id in staff_ids_for_perms:
+                        role = guild.get_role(role_id)
+                        if role:
+                            overwrites_thread[role] = discord.PermissionOverwrite(
+                                view_channel=True, manage_threads=True, send_messages_in_threads=True,
+                                read_message_history=True,
+                            )
+                    await parent.edit(overwrites=overwrites_thread)
+                except Exception:
                     pass
 
             # Create Panel
@@ -1138,8 +1247,8 @@ class TicketCog(commands.Cog, name="TicketCog"):
             data["panels"][panel_id] = {
                 "id": int(panel_id),
                 "name": panel_name,
-                "category_id": category.id,
-                "channel_id": interaction.channel.id,  # Store the channel ID
+                "category_id": category.id if mode == "channel" else None,
+                "channel_id": interaction.channel.id,  # Panel message channel
                 "type": p_type,
                 "message_id": None
             }
@@ -1322,60 +1431,85 @@ class TicketCog(commands.Cog, name="TicketCog"):
             username = interaction.user.name.lower().replace(' ', '-')
             chan_name = f"🎫-{clean_label}-{username}"
 
-            category = guild.get_channel(panel["category_id"])
-            if category and len(category.channels) >= 50:
-                i = 2
-                while True:
-                    overflow_name = f"{category.name} {i}"
-                    existing = discord.utils.get(guild.categories, name=overflow_name)
-                    if existing:
-                        if len(existing.channels) < 50:
-                            category = existing
-                            break
-                        else:
-                            i += 1
-                    else:
-                        category = await guild.create_category(name=overflow_name, overwrites=category.overwrites)
-                        break
-
-            # Start with category overwrites
-            overwrites = {}
-            if category:
-                for target, overwrite in category.overwrites.items():
-                    overwrites[target] = overwrite
-
-            _ticket_perms = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-            _bot_perms    = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True, manage_messages=True)
-
-            overwrites[guild.default_role] = discord.PermissionOverwrite(view_channel=False)
-            overwrites[interaction.user]   = _ticket_perms
-            overwrites[guild.me]           = _bot_perms
-
-            # This guild's configured staff/admin roles all get ticket access
+            ticket_mode = server_cfg.get("ticket_mode", "channel")
             staff_role_id = server_cfg.get("staff_role_id")
-            for role_id in (staff_role_id, server_cfg.get("staff2_role_id"), server_cfg.get("admin_role_id")):
-                if not role_id:
-                    continue
-                role = guild.get_role(role_id)
-                if role:
-                    overwrites[role] = _ticket_perms
-
             ping_role_id = server_cfg.get("ping_role_id")
-            if ping_role_id:
-                ping_role = guild.get_role(ping_role_id)
-                if ping_role and ping_role.id not in (staff_role_id, server_cfg.get("staff2_role_id"), server_cfg.get("admin_role_id")):
-                    overwrites[ping_role] = _ticket_perms
 
-            try:
-                ticket_channel = await guild.create_text_channel(name=chan_name, category=category, overwrites=overwrites)
-            except discord.Forbidden:
-                # Silently attempt to repair
-                await self.auto_repair_guild_permissions(interaction.guild)
-                await interaction.followup.send("❌ I am missing the 'Manage Channels' permission to create this ticket. I've attempted an auto-repair, please try again in a moment.", ephemeral=True)
-                raise
-            except discord.HTTPException as e:
-                await interaction.followup.send(f"Failed to create ticket: {e}", ephemeral=True)
-                return
+            if ticket_mode == "thread":
+                thread_channel_id = server_cfg.get("thread_channel_id")
+                parent = guild.get_channel(thread_channel_id) if thread_channel_id else None
+                if not parent:
+                    await interaction.followup.send("❌ This server's ticket thread channel is missing or was deleted. An admin needs to run `/setup` again.", ephemeral=True)
+                    return
+                try:
+                    ticket_channel = await parent.create_thread(
+                        name=chan_name,
+                        type=discord.ChannelType.private_thread,
+                        invitable=False,
+                        auto_archive_duration=10080,
+                        reason=f"Ticket opened by {interaction.user}",
+                    )
+                    await ticket_channel.add_user(interaction.user)
+                except discord.Forbidden:
+                    await self.auto_repair_guild_permissions(interaction.guild)
+                    await interaction.followup.send("❌ I am missing permissions to create ticket threads. I've attempted an auto-repair, please try again in a moment.", ephemeral=True)
+                    return
+                except discord.HTTPException as e:
+                    await interaction.followup.send(f"Failed to create ticket: {e}", ephemeral=True)
+                    return
+            else:
+                category = guild.get_channel(panel["category_id"])
+                if category and len(category.channels) >= 50:
+                    i = 2
+                    while True:
+                        overflow_name = f"{category.name} {i}"
+                        existing = discord.utils.get(guild.categories, name=overflow_name)
+                        if existing:
+                            if len(existing.channels) < 50:
+                                category = existing
+                                break
+                            else:
+                                i += 1
+                        else:
+                            category = await guild.create_category(name=overflow_name, overwrites=category.overwrites)
+                            break
+
+                # Start with category overwrites
+                overwrites = {}
+                if category:
+                    for target, overwrite in category.overwrites.items():
+                        overwrites[target] = overwrite
+
+                _ticket_perms = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+                _bot_perms    = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True, manage_messages=True)
+
+                overwrites[guild.default_role] = discord.PermissionOverwrite(view_channel=False)
+                overwrites[interaction.user]   = _ticket_perms
+                overwrites[guild.me]           = _bot_perms
+
+                # This guild's configured staff/admin roles all get ticket access
+                for role_id in (staff_role_id, server_cfg.get("staff2_role_id"), server_cfg.get("admin_role_id")):
+                    if not role_id:
+                        continue
+                    role = guild.get_role(role_id)
+                    if role:
+                        overwrites[role] = _ticket_perms
+
+                if ping_role_id:
+                    ping_role = guild.get_role(ping_role_id)
+                    if ping_role and ping_role.id not in (staff_role_id, server_cfg.get("staff2_role_id"), server_cfg.get("admin_role_id")):
+                        overwrites[ping_role] = _ticket_perms
+
+                try:
+                    ticket_channel = await guild.create_text_channel(name=chan_name, category=category, overwrites=overwrites)
+                except discord.Forbidden:
+                    # Silently attempt to repair
+                    await self.auto_repair_guild_permissions(interaction.guild)
+                    await interaction.followup.send("❌ I am missing the 'Manage Channels' permission to create this ticket. I've attempted an auto-repair, please try again in a moment.", ephemeral=True)
+                    raise
+                except discord.HTTPException as e:
+                    await interaction.followup.send(f"Failed to create ticket: {e}", ephemeral=True)
+                    return
 
             created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -1417,9 +1551,23 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 icon_url=icon_url,
                 opened_ts=opened_ts,
             )
-            # V2 LayoutView can't include content= — send pings separately first
             await ticket_channel.send(content=content)
             await ticket_channel.send(view=layout)
+
+            repeat_hours = server_cfg.get("repeat_ticket_hours", 72)
+            repeat = await self._find_repeat_ticket(guild.id, interaction.user.id, option_id, repeat_hours)
+            if repeat:
+                closed_dt = datetime.datetime.fromisoformat(repeat["closed_at"])
+                await ticket_channel.send(view=PanelView(
+                    title="🔁 Repeat Ticket Detected",
+                    description=(
+                        f"{interaction.user.mention} had ticket **#{repeat['id']}** on this same topic "
+                        f"closed {discord.utils.format_dt(closed_dt, 'R')}."
+                    ),
+                    fields=[("Previous resolution", repeat.get("close_reason") or "No reason recorded.", False)],
+                    color=Colors.WARNING,
+                ))
+
             await interaction.followup.send(f"Ticket created: {ticket_channel.mention}", ephemeral=True)
 
             tc_id = server_cfg.get("transcript_channel_id")
@@ -1471,8 +1619,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
         }
         ticket.setdefault("messages", []).append(msg_data)
 
-        # First-response SLA tracking: the first non-creator, non-bot message
-        # in an open ticket marks it as "responded to" for SLA purposes.
         if not ticket.get("first_response_at") and message.author.id != ticket.get("creator_id"):
             ticket["first_response_at"] = msg_data["timestamp"]
 
@@ -1514,24 +1660,36 @@ class TicketCog(commands.Cog, name="TicketCog"):
             except:
                 pass
 
-            # Remove creator permissions
-            try:
-                creator_member = guild.get_member(ticket["creator_id"])
-                if creator_member:
-                    await channel.set_permissions(creator_member, overwrite=None)
-            except:
-                pass
+            if isinstance(channel, discord.Thread):
+                try:
+                    creator_member = guild.get_member(ticket["creator_id"])
+                    if creator_member:
+                        await channel.remove_user(creator_member)
+                except:
+                    pass
+                try:
+                    await channel.edit(locked=True, archived=True)
+                except:
+                    pass
+            else:
+                # Remove creator permissions
+                try:
+                    creator_member = guild.get_member(ticket["creator_id"])
+                    if creator_member:
+                        await channel.set_permissions(creator_member, overwrite=None)
+                except:
+                    pass
 
-            # Move to closed category
-            try:
-                cfg = self._cfg(guild.id)
-                closed_cat_id = cfg.get("closed_category_id")
-                if closed_cat_id:
-                    closed_cat = guild.get_channel(closed_cat_id)
-                    if closed_cat and isinstance(channel, discord.TextChannel):
-                        await channel.edit(category=closed_cat, sync_permissions=True)
-            except:
-                pass
+                # Move to closed category
+                try:
+                    cfg = self._cfg(guild.id)
+                    closed_cat_id = cfg.get("closed_category_id")
+                    if closed_cat_id:
+                        closed_cat = guild.get_channel(closed_cat_id)
+                        if closed_cat:
+                            await channel.edit(category=closed_cat, sync_permissions=True)
+                except:
+                    pass
 
             # Send rating DM to the ticket creator
             try:
@@ -1710,13 +1868,22 @@ class TicketCog(commands.Cog, name="TicketCog"):
             username = creator.name.lower().replace(' ', '-') if creator else "unknown"
             original_name = f"🎫-{clean_label}-{username}"
 
-            try:
-                await channel.edit(name=original_name)
-            except:
-                pass
-
-            if isinstance(channel, discord.TextChannel):
-                creator_member = interaction.guild.get_member(ticket["creator_id"])
+            creator_member = interaction.guild.get_member(ticket["creator_id"])
+            if isinstance(channel, discord.Thread):
+                try:
+                    await channel.edit(name=original_name, archived=False, locked=False)
+                except:
+                    pass
+                if creator_member:
+                    try:
+                        await channel.add_user(creator_member)
+                    except:
+                        pass
+            else:
+                try:
+                    await channel.edit(name=original_name)
+                except:
+                    pass
                 if creator_member:
                     await channel.set_permissions(creator_member, view_channel=True, send_messages=True, read_message_history=True)
 
@@ -1766,7 +1933,7 @@ class TicketCog(commands.Cog, name="TicketCog"):
         if not ticket:
             return await interaction.response.send_message("❌ This is not a ticket channel.", ephemeral=True)
 
-        await interaction.channel.set_permissions(member, view_channel=True, send_messages=True, read_message_history=True)
+        await self._grant_access(interaction.channel, member)
 
         await interaction.response.send_message(view=PanelView(description=f"✅ {member.mention} has been added to this ticket.", color=Colors.SUCCESS))
 
@@ -1779,7 +1946,7 @@ class TicketCog(commands.Cog, name="TicketCog"):
         if not ticket:
             return await interaction.response.send_message("❌ This is not a ticket channel.", ephemeral=True)
 
-        await interaction.channel.set_permissions(member, overwrite=None)
+        await self._revoke_access(interaction.channel, member)
 
         await interaction.response.send_message(view=PanelView(description=f"✅ {member.mention} has been removed from this ticket.", color=Colors.DANGER))
 
@@ -1830,15 +1997,16 @@ class TicketCog(commands.Cog, name="TicketCog"):
                             await fix_perms(cat)
                     except: pass
 
-            # 5. Active Ticket Channels
+            # 5. Active Ticket Channels (threads repair nothing here — access is
+            # via membership + role-level Manage Threads, not per-channel overwrites)
             guild_tickets_dir = self.db.tickets_dir / str(guild.id)
             if guild_tickets_dir.exists():
                 for ticket_file in guild_tickets_dir.glob("*.json"):
                     try:
                         t = json.loads(ticket_file.read_text(encoding="utf-8"))
                         if t.get("status") == "open":
-                            chan = guild.get_channel(t["channel_id"])
-                            if chan:
+                            chan = guild.get_channel(t["channel_id"]) or guild.get_thread(t["channel_id"])
+                            if chan and not isinstance(chan, discord.Thread):
                                 await fix_perms(chan)
                     except: continue
         except Exception as e:
@@ -1872,28 +2040,22 @@ class TicketCog(commands.Cog, name="TicketCog"):
             self._mark_dirty(interaction.channel.id)
             self.bot.ui.append_log("", "OK", f"ticket: #{ticket['id']} claimed by {interaction.user} in {interaction.guild.name}")
 
-            # --- Permission Adjustment ---
-            # 1. Grant explicit access to the claiming staff member
-            await interaction.channel.set_permissions(interaction.user, view_channel=True, send_messages=True, read_message_history=True)
+            await self._grant_access(interaction.channel, interaction.user)
 
-            # 2. Remove the secondary staff role from overwrites so other support members lose access
-            staff2_id = cfg.get("staff2_role_id")
-            staff2 = interaction.guild.get_role(staff2_id) if staff2_id else None
-            if staff2:
-                await interaction.channel.set_permissions(staff2, overwrite=None)
+            if not isinstance(interaction.channel, discord.Thread):
+                staff2_id = cfg.get("staff2_role_id")
+                staff2 = interaction.guild.get_role(staff2_id) if staff2_id else None
+                if staff2:
+                    await interaction.channel.set_permissions(staff2, overwrite=None)
 
-            # 3. Remove dynamic ping role if it differs from the main staff role
-            ping_role_id = cfg.get("ping_role_id")
-            if ping_role_id:
-                ping_role = interaction.guild.get_role(ping_role_id)
-                if ping_role and ping_role.id != cfg.get("staff_role_id"):
-                    await interaction.channel.set_permissions(ping_role, overwrite=None)
+                ping_role_id = cfg.get("ping_role_id")
+                if ping_role_id:
+                    ping_role = interaction.guild.get_role(ping_role_id)
+                    if ping_role and ping_role.id != cfg.get("staff_role_id"):
+                        await interaction.channel.set_permissions(ping_role, overwrite=None)
 
-            # 4. Ensure the ticket author (creator) keeps explicit access
             creator = interaction.guild.get_member(ticket["creator_id"])
-            if creator:
-                await interaction.channel.set_permissions(creator, view_channel=True, send_messages=True, read_message_history=True)
-            # -----------------------------
+            await self._grant_access(interaction.channel, creator)
 
             # Respond first — interaction.message.edit() consumes the response slot
             await interaction.response.send_message(f"✅ You have claimed this ticket, {interaction.user.mention}!", ephemeral=False)
@@ -1998,7 +2160,7 @@ class TicketCog(commands.Cog, name="TicketCog"):
             if not admin_role:
                 return await interaction.response.send_message("❌ The configured admin role no longer exists.", ephemeral=True)
 
-            await interaction.channel.set_permissions(admin_role, view_channel=True, send_messages=True, read_message_history=True)
+            await self._grant_role_access(interaction.channel, admin_role)
             ticket = self.ticket_cache.get(interaction.channel.id)
             tid = f"#{ticket['id']}" if ticket else interaction.channel.name
             self.bot.ui.append_log("", "WARN", f"ticket: {tid} escalated by {interaction.user} → {admin_role.name} in {interaction.guild.name}")
@@ -2037,20 +2199,17 @@ class TicketCog(commands.Cog, name="TicketCog"):
                     staff_role_id = cfg.get("staff_role_id")
                     has_main_staff = staff_role_id and any(r.id == staff_role_id for r in old_claimant.roles)
                     if not has_main_staff:
-                        await interaction.channel.set_permissions(old_claimant, overwrite=None)
+                        await self._revoke_access(interaction.channel, old_claimant)
 
             ticket["claimant_id"] = None
             await self.db.update_ticket(ticket["id"], claimant_id=None)
             await self.db.save_json_backup(interaction.guild.id, ticket)
             self._mark_dirty(interaction.channel.id)
 
-            # Update permissions to grant the new role access
-            await interaction.channel.set_permissions(role, view_channel=True, send_messages=True, read_message_history=True)
+            await self._grant_role_access(interaction.channel, role)
 
-            # Edit the ephemeral message that contained the select menu
             await interaction.response.edit_message(content=f"✅ Ticket transferred to {role.mention}.", view=None)
 
-            # Send the public announcement pinging the new role
             await interaction.channel.send(content=role.mention, allowed_mentions=discord.AllowedMentions(roles=False))
             await interaction.channel.send(view=PanelView(
                 title="🔀 Ticket Transferred",
@@ -2181,8 +2340,9 @@ class TicketCog(commands.Cog, name="TicketCog"):
         cooldown_seconds="Cooldown between tickets in seconds",
         inactivity_hours="Auto-close tickets after N hours of inactivity (0 = disable)",
         sla_minutes="Remind staff if no one replies within N minutes of a ticket opening (0 = disable)",
+        repeat_ticket_hours="Flag a new ticket as a repeat if the same user closed one on the same topic within N hours (0 = disable)",
     )
-    async def ticket_config(self, interaction: discord.Interaction, max_tickets: int = None, cooldown_seconds: int = None, inactivity_hours: int = None, sla_minutes: int = None):
+    async def ticket_config(self, interaction: discord.Interaction, max_tickets: int = None, cooldown_seconds: int = None, inactivity_hours: int = None, sla_minutes: int = None, repeat_ticket_hours: int = None):
         if not self.is_staff_or_owner(interaction):
             return await interaction.response.send_message("❌ This command is restricted to staff or owners.", ephemeral=True)
         data = await self.db.get_config()
@@ -2200,12 +2360,16 @@ class TicketCog(commands.Cog, name="TicketCog"):
         if sla_minutes is not None:
             cfg["sla_minutes"] = max(sla_minutes, 0)
             changes.append(f"sla_reminder → `{cfg['sla_minutes']}m`")
+        if repeat_ticket_hours is not None:
+            cfg["repeat_ticket_hours"] = max(repeat_ticket_hours, 0)
+            changes.append(f"repeat_ticket_window → `{cfg['repeat_ticket_hours']}h`")
         await self._save_config(data)
         current = (
             f"**Current:** max_tickets=`{cfg.get('max_tickets', 3)}`, "
             f"cooldown=`{cfg.get('cooldown_seconds', 300)}s`, "
             f"inactivity_auto_close=`{cfg.get('inactivity_hours', 48)}h`, "
-            f"sla_reminder=`{cfg.get('sla_minutes', 15)}m`"
+            f"sla_reminder=`{cfg.get('sla_minutes', 15)}m`, "
+            f"repeat_ticket_window=`{cfg.get('repeat_ticket_hours', 72)}h`"
         )
         await interaction.response.send_message(f"✅ {' | '.join(changes) if changes else 'No changes.'}\n{current}", ephemeral=True)
 
