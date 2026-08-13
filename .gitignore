@@ -1,0 +1,37 @@
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+*.log
+bot_debug.log
+debug.log
+/Logs/
+
+# Persistent bot data (config, tickets, transcripts, SQLite DB) — never committed
+/Data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+/.claude/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Editor temp
+*.swp
+*.swo
+*~
+*.orig
