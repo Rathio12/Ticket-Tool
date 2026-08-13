@@ -729,6 +729,7 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 self.ticket_cache[t["channel_id"]] = t
         print(f"[TICKETS] Cache initialized — {len(self.ticket_cache)} tickets tracked.")
         self.inactivity_check.start()
+        self.sla_check.start()
 
     def _mark_dirty(self, channel_id: int):
         """Flag a ticket channel to be backed up on the next loop tick."""
@@ -779,6 +780,55 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
     @inactivity_check.before_loop
     async def before_inactivity(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(minutes=2)
+    async def sla_check(self):
+        """First-response SLA: if no staff member has replied within the
+        configured window, ping the staff/ping role once as a reminder.
+        This is the bot's flagship differentiator — most ticket bots only
+        track close time, not whether anyone has actually responded yet."""
+        for ch_id, ticket in list(self.ticket_cache.items()):
+            if ticket.get("status") != "open" or ticket.get("first_response_at"):
+                continue
+            cfg = self._cfg(ticket["guild_id"])
+            sla_minutes = cfg.get("sla_minutes", 15)
+            if not sla_minutes or ticket.get("_sla_reminded"):
+                continue
+            try:
+                created_dt = datetime.datetime.fromisoformat(ticket["created_at"])
+                elapsed_min = (datetime.datetime.now(datetime.timezone.utc) - created_dt).total_seconds() / 60
+                if elapsed_min < sla_minutes:
+                    continue
+                channel = self.bot.get_channel(ch_id)
+                if not channel:
+                    continue
+                ticket["_sla_reminded"] = True
+                ping_role_id = cfg.get("staff_role_id") or cfg.get("ping_role_id")
+                mention = f"<@&{ping_role_id}>" if ping_role_id else ""
+                if mention:
+                    await channel.send(content=mention, allowed_mentions=discord.AllowedMentions(roles=True))
+                await channel.send(view=PanelView(
+                    title="⏱️ SLA Reminder",
+                    description=(
+                        f"This ticket has had **no staff response** for over `{sla_minutes}` minutes.\n"
+                        f"Please take a look when you get a chance."
+                    ),
+                    color=Colors.WARNING,
+                ))
+                esc_chan_id = cfg.get("escalation_channel_id")
+                if esc_chan_id:
+                    esc_chan = self.bot.get_channel(esc_chan_id)
+                    await self.safe_send(esc_chan, view=PanelView(
+                        title="⏱️ SLA Breach",
+                        description=f"Ticket #{ticket['id']} ({channel.mention}) has gone `{sla_minutes}m+` without a staff reply.",
+                        color=Colors.WARNING,
+                    ))
+            except Exception:
+                pass
+
+    @sla_check.before_loop
+    async def before_sla_check(self):
         await self.bot.wait_until_ready()
 
     def is_staff_or_owner(self, interaction: discord.Interaction) -> bool:
@@ -1420,6 +1470,11 @@ class TicketCog(commands.Cog, name="TicketCog"):
             "attachments": attachments
         }
         ticket.setdefault("messages", []).append(msg_data)
+
+        # First-response SLA tracking: the first non-creator, non-bot message
+        # in an open ticket marks it as "responded to" for SLA purposes.
+        if not ticket.get("first_response_at") and message.author.id != ticket.get("creator_id"):
+            ticket["first_response_at"] = msg_data["timestamp"]
 
         await self.db.insert_message(ticket["id"], msg_data)
         await self.db.save_json_backup(message.guild.id, ticket)
@@ -2121,8 +2176,13 @@ class TicketCog(commands.Cog, name="TicketCog"):
     # Ticket config command
     # -------------------------------------------------------------------
     @ticket.command(name="config", description="Configure ticket settings.")
-    @app_commands.describe(max_tickets="Max open tickets per user (0 = unlimited)", cooldown_seconds="Cooldown between tickets in seconds", inactivity_hours="Auto-close tickets after N hours of inactivity (0 = disable)")
-    async def ticket_config(self, interaction: discord.Interaction, max_tickets: int = None, cooldown_seconds: int = None, inactivity_hours: int = None):
+    @app_commands.describe(
+        max_tickets="Max open tickets per user (0 = unlimited)",
+        cooldown_seconds="Cooldown between tickets in seconds",
+        inactivity_hours="Auto-close tickets after N hours of inactivity (0 = disable)",
+        sla_minutes="Remind staff if no one replies within N minutes of a ticket opening (0 = disable)",
+    )
+    async def ticket_config(self, interaction: discord.Interaction, max_tickets: int = None, cooldown_seconds: int = None, inactivity_hours: int = None, sla_minutes: int = None):
         if not self.is_staff_or_owner(interaction):
             return await interaction.response.send_message("❌ This command is restricted to staff or owners.", ephemeral=True)
         data = await self.db.get_config()
@@ -2137,8 +2197,16 @@ class TicketCog(commands.Cog, name="TicketCog"):
         if inactivity_hours is not None:
             cfg["inactivity_hours"] = max(inactivity_hours, 0)
             changes.append(f"inactivity_auto_close → `{cfg['inactivity_hours']}h`")
+        if sla_minutes is not None:
+            cfg["sla_minutes"] = max(sla_minutes, 0)
+            changes.append(f"sla_reminder → `{cfg['sla_minutes']}m`")
         await self._save_config(data)
-        current = f"**Current:** max_tickets=`{cfg.get('max_tickets', 3)}`, cooldown=`{cfg.get('cooldown_seconds', 300)}s`, inactivity_auto_close=`{cfg.get('inactivity_hours', 48)}h`"
+        current = (
+            f"**Current:** max_tickets=`{cfg.get('max_tickets', 3)}`, "
+            f"cooldown=`{cfg.get('cooldown_seconds', 300)}s`, "
+            f"inactivity_auto_close=`{cfg.get('inactivity_hours', 48)}h`, "
+            f"sla_reminder=`{cfg.get('sla_minutes', 15)}m`"
+        )
         await interaction.response.send_message(f"✅ {' | '.join(changes) if changes else 'No changes.'}\n{current}", ephemeral=True)
 
     # -------------------------------------------------------------------

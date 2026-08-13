@@ -58,6 +58,8 @@ def _collect_stats(guild_id: int) -> dict:
     closed_this_week = 0
     staff_counts: dict[int, int] = defaultdict(int)
     avg_close_times: list[float] = []
+    avg_response_times: list[float] = []
+    sla_breaches = 0
 
     for f in guild_dir.iterdir():
         if f.suffix != ".json":
@@ -67,10 +69,11 @@ def _collect_stats(guild_id: int) -> dict:
         except Exception:
             continue
 
-        status     = data.get("status")
-        created_at = data.get("created_at")
-        closed_at  = data.get("closed_at")
-        claimant   = data.get("claimant_id")
+        status       = data.get("status")
+        created_at   = data.get("created_at")
+        closed_at    = data.get("closed_at")
+        claimant     = data.get("claimant_id")
+        responded_at = data.get("first_response_at")
 
         if status == "open":
             total_open += 1
@@ -100,11 +103,24 @@ def _collect_stats(guild_id: int) -> dict:
             except Exception:
                 pass
 
+        if created_at and responded_at:
+            try:
+                created_dt = datetime.fromisoformat(created_at)
+                responded_dt = datetime.fromisoformat(responded_at)
+                diff = (responded_dt - created_dt).total_seconds() / 60
+                if diff >= 0:
+                    avg_response_times.append(diff)
+            except Exception:
+                pass
+        elif status == "closed" and not responded_at:
+            sla_breaches += 1
+
         if claimant:
             staff_counts[claimant] += 1
 
     top_staff = sorted(staff_counts.items(), key=lambda x: x[1], reverse=True)[:5]
     avg_mins  = round(sum(avg_close_times) / len(avg_close_times)) if avg_close_times else None
+    avg_response_mins = round(sum(avg_response_times) / len(avg_response_times)) if avg_response_times else None
 
     return {
         "total_open":       total_open,
@@ -114,6 +130,8 @@ def _collect_stats(guild_id: int) -> dict:
         "closed_this_week": closed_this_week,
         "top_staff":        top_staff,
         "avg_close_mins":   avg_mins,
+        "avg_response_mins": avg_response_mins,
+        "sla_breaches":     sla_breaches,
         "generated_at":     now,
     }
 
@@ -137,6 +155,7 @@ def _build_panel(guild: discord.Guild, stats: dict) -> PanelView:
     total           = stats["total_open"] + stats["total_closed"]
     resolution_rate = round((stats["total_closed"] / total) * 100) if total else 0
     avg_str         = _fmt_mins(stats["avg_close_mins"]) if stats["avg_close_mins"] is not None else "—"
+    avg_response_str = _fmt_mins(stats["avg_response_mins"]) if stats["avg_response_mins"] is not None else "—"
     filled          = round(resolution_rate / 10)
     bar             = "█" * filled + "░" * (10 - filled)
     thumb           = guild.icon.url if guild.icon else None
@@ -153,6 +172,9 @@ def _build_panel(guild: discord.Guild, stats: dict) -> PanelView:
          True),
         ("📈  Resolution Rate",
          f"`{bar}` **{resolution_rate}%** of all tickets resolved",
+         False),
+        ("⏱️  Avg First Response",
+         f"`{avg_response_str}`  —  `{stats['sla_breaches']}` closed with no staff reply",
          False),
     ]
     if stats["top_staff"]:

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5865F2"/>
+      <stop offset="100%" stop-color="#2B2D31"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.02"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="300" fill="url(#bg)"/>
+
+  <!-- decorative dot grid -->
+  <g fill="#ffffff" opacity="0.08">
+    <circle cx="60" cy="40" r="3"/><circle cx="100" cy="40" r="3"/><circle cx="140" cy="40" r="3"/>
+    <circle cx="60" cy="80" r="3"/><circle cx="100" cy="80" r="3"/><circle cx="140" cy="80" r="3"/>
+    <circle cx="1060" cy="220" r="3"/><circle cx="1100" cy="220" r="3"/><circle cx="1140" cy="220" r="3"/>
+    <circle cx="1060" cy="260" r="3"/><circle cx="1100" cy="260" r="3"/><circle cx="1140" cy="260" r="3"/>
+  </g>
+
+  <!-- ticket icon card -->
+  <g transform="translate(80,95)">
+    <rect x="0" y="0" width="110" height="110" rx="24" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.25"/>
+    <text x="55" y="72" font-size="56" text-anchor="middle" font-family="Segoe UI Emoji, Apple Color Emoji, sans-serif">🎫</text>
+  </g>
+
+  <text x="230" y="150" font-family="Segoe UI, Arial, sans-serif" font-size="56" font-weight="700" fill="#ffffff">Ticket Tool</text>
+  <text x="230" y="190" font-family="Segoe UI, Arial, sans-serif" font-size="22" fill="#E3E5E8">Multi-guild Discord support tickets — Components V2, first-response SLA, self-serve /setup</text>
+
+  <!-- pill badges -->
+  <g font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#ffffff">
+    <rect x="230" y="220" width="150" height="34" rx="17" fill="#ffffff" fill-opacity="0.12"/>
+    <text x="305" y="242" text-anchor="middle">discord.py 2.6+</text>
+
+    <rect x="392" y="220" width="130" height="34" rx="17" fill="#ffffff" fill-opacity="0.12"/>
+    <text x="457" y="242" text-anchor="middle">Any server</text>
+
+    <rect x="534" y="220" width="150" height="34" rx="17" fill="#ffffff" fill-opacity="0.12"/>
+    <text x="609" y="242" text-anchor="middle">Components V2</text>
+  </g>
+</svg>
