@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "ticket-tool",
+      name: "TicketV2",
       script: "main.py",
       interpreter: "python3",
       cwd: __dirname + "/..",

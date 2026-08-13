@@ -99,19 +99,26 @@ To switch the restart schedule manually, edit `OnCalendar=` in
 If you already run other bots/apps under [pm2](https://pm2.keymetrics.io/) on this VPS
 and would rather keep everything under one process manager, use
 `deploy/ecosystem.config.js` instead of the systemd unit — **don't run both** for the
-same bot; pick one supervisor.
+same bot; pick one supervisor. The app is named `TicketV2` in the ecosystem file;
+rename it there if you'd rather call it something else.
 
 ```
 npm install -g pm2
 cd /opt/ticket-tool
-pm2 start deploy/ecosystem.config.js
-pm2 save
+bash deploy/install-pm2.sh
 pm2 startup   # follow the printed command once, to survive reboots
 ```
 
+`install-pm2.sh` runs `pm2 start deploy/ecosystem.config.js` + `pm2 save`, warns you if
+`TICKETBOT_AUTO_SYSTEMD=1` is still set in `.env` (it needs to be `0` under pm2 — see
+below), and posts the same kind of success/failure message to `RESTART_LOG_CHANNEL_ID`
+as `install.sh` does for the systemd path, so you get the same "it's working"
+confirmation either way. You can also just run the two pm2 commands yourself instead
+if you don't want the notification.
+
 pm2's `cron_restart` field in `ecosystem.config.js` does the same job as the systemd
 timer — it's set to `0 4 * * *` (daily at 04:00) by default. For weekly instead, edit
-that line to `0 4 * * 1` (04:00 every Monday), then `pm2 restart ticket-tool`. Crash
+that line to `0 4 * * 1` (04:00 every Monday), then `pm2 restart TicketV2`. Crash
 recovery (`autorestart: true`) is pm2's own equivalent of systemd's `Restart=on-failure`.
 
 **Important:** the ecosystem file sets `TICKETBOT_AUTO_SYSTEMD=0` explicitly. Leave that
@@ -119,9 +126,9 @@ as-is — if it were left enabled and pm2 runs the bot as root, `main.py` would 
 install *and start the systemd unit too* on every restart, giving you two competing
 supervisors fighting over the same bot process. Pick pm2 **or** systemd, not both.
 
-Useful pm2 commands: `pm2 status`, `pm2 logs ticket-tool`, `pm2 restart ticket-tool`.
+Useful pm2 commands: `pm2 status`, `pm2 logs TicketV2`, `pm2 restart TicketV2`.
 
 The `RESTART_LOG_CHANNEL_ID` restart announcements ("🔁 Restarting" / "✅ Restart
 complete" / unclean-shutdown warnings) live in `main.py` itself and fire on any SIGTERM
-— they work the same under pm2 as under systemd. Only the install-success/failure
-message described above is specific to running `install.sh` for the systemd path.
+— they work the same under pm2 as under systemd, on top of the one-time install
+confirmation from `install-pm2.sh` / `install.sh`.
