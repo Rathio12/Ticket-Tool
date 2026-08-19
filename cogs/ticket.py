@@ -545,9 +545,18 @@ class TicketOpenLayout(ui.LayoutView):
         if cog: await cog.escalate_ticket_process(interaction)
 
     async def _transfer(self, interaction: discord.Interaction):
+        cog = interaction.client.get_cog("TicketCog")
+        if cog and not cog.is_staff_or_owner(interaction):
+            return await interaction.response.send_message("❌ This command is restricted to staff or owners.", ephemeral=True)
         await interaction.response.send_message("Select a role to transfer this ticket to:", view=TicketTransferView(), ephemeral=True)
 
     async def _close(self, interaction: discord.Interaction):
+        cog = interaction.client.get_cog("TicketCog")
+        if cog:
+            ticket = cog.ticket_cache.get(interaction.channel.id)
+            is_creator = ticket and ticket.get("creator_id") == interaction.user.id
+            if not is_creator and not cog.is_staff_or_owner(interaction):
+                return await interaction.response.send_message("❌ This command is restricted to the ticket creator, staff, or owners.", ephemeral=True)
         await interaction.response.send_message("Select a reason for closing this ticket:", view=TicketCloseReasonView(), ephemeral=True)
 
 
@@ -650,10 +659,19 @@ class TicketCloseView(discord.ui.View):
 
     @discord.ui.button(label="Transfer", style=discord.ButtonStyle.secondary, emoji="🔀", custom_id="transfer_ticket_btn")
     async def transfer_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = interaction.client.get_cog("TicketCog")
+        if cog and not cog.is_staff_or_owner(interaction):
+            return await interaction.response.send_message("❌ This command is restricted to staff or owners.", ephemeral=True)
         await interaction.response.send_message("Select a role to transfer this ticket to:", view=TicketTransferView(), ephemeral=True)
 
     @discord.ui.button(label="Close", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="close_ticket_btn")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = interaction.client.get_cog("TicketCog")
+        if cog:
+            ticket = cog.ticket_cache.get(interaction.channel.id)
+            is_creator = ticket and ticket.get("creator_id") == interaction.user.id
+            if not is_creator and not cog.is_staff_or_owner(interaction):
+                return await interaction.response.send_message("❌ This command is restricted to the ticket creator, staff, or owners.", ephemeral=True)
         await interaction.response.send_message("Select a reason for closing this ticket:", view=TicketCloseReasonView(), ephemeral=True)
 
 
@@ -1666,8 +1684,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
     async def close_ticket_process(self, interaction: discord.Interaction, reason: str = ""):
         try:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("Closing ticket...", ephemeral=True)
             channel = interaction.channel
 
             ticket = self.ticket_cache.get(channel.id)
@@ -1679,6 +1695,17 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 return
 
             is_creator = ticket.get("creator_id") == interaction.user.id
+            if not is_creator and not self.is_staff_or_owner(interaction):
+                msg = "❌ This command is restricted to the ticket creator, staff, or owners."
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(msg, ephemeral=True)
+                else:
+                    await interaction.followup.send(msg, ephemeral=True)
+                return
+
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Closing ticket...", ephemeral=True)
+
             default_reason = "Issue resolved and ticket closed by staff."
             if is_creator:
                 default_reason = "Ticket closed by the creator."
@@ -2079,6 +2106,9 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
     async def escalate_ticket_process(self, interaction: discord.Interaction):
         try:
+            if not self.is_staff_or_owner(interaction):
+                return await interaction.response.send_message("❌ This command is restricted to staff or owners.", ephemeral=True)
+
             server_cfg = self._cfg(interaction.guild.id)
             admin_role_id = server_cfg.get("admin_role_id")
             esc_chan_id = server_cfg.get("escalation_channel_id")
@@ -2116,6 +2146,9 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
     async def transfer_ticket_process(self, interaction: discord.Interaction, role: discord.Role):
         try:
+            if not self.is_staff_or_owner(interaction):
+                return await interaction.response.send_message("❌ This command is restricted to staff or owners.", ephemeral=True)
+
             ticket = self.ticket_cache.get(interaction.channel.id)
             if not ticket:
                 return await interaction.response.send_message("❌ Error: Ticket not found in database.", ephemeral=True)
