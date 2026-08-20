@@ -1224,28 +1224,7 @@ class TicketCog(commands.Cog, name="TicketCog"):
                             return await interaction.followup.send("❌ I do not have permission to create the ticket thread channel.", ephemeral=True)
 
                 cfg["thread_channel_id"] = parent.id
-                try:
-                    overwrites_thread = {
-                        guild.default_role: discord.PermissionOverwrite(
-                            view_channel=True, send_messages=False,
-                            create_private_threads=False, create_public_threads=False,
-                        ),
-                        guild.me: discord.PermissionOverwrite(
-                            view_channel=True, send_messages=True, read_message_history=True,
-                            manage_channels=True, manage_threads=True, create_private_threads=True,
-                            send_messages_in_threads=True,
-                        ),
-                    }
-                    for role_id in staff_ids_for_perms:
-                        role = guild.get_role(role_id)
-                        if role:
-                            overwrites_thread[role] = discord.PermissionOverwrite(
-                                view_channel=True, manage_threads=True, send_messages_in_threads=True,
-                                read_message_history=True,
-                            )
-                    await parent.edit(overwrites=overwrites_thread)
-                except Exception:
-                    pass
+                await self._apply_thread_channel_overwrites(guild, parent, staff_ids_for_perms)
 
             data["counters"]["panels"] += 1
             panel_id = str(data["counters"]["panels"])
@@ -1979,6 +1958,31 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
         await interaction.response.send_message(view=PanelView(description=f"✅ {member.mention} has been removed from this ticket.", color=Colors.DANGER))
 
+    async def _apply_thread_channel_overwrites(self, guild: discord.Guild, parent: discord.TextChannel, staff_role_ids: list):
+        try:
+            overwrites_thread = {
+                guild.default_role: discord.PermissionOverwrite(
+                    view_channel=True, send_messages=False,
+                    create_private_threads=False, create_public_threads=False,
+                    send_messages_in_threads=True, read_message_history=True,
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True, read_message_history=True,
+                    manage_channels=True, manage_threads=True, create_private_threads=True,
+                    send_messages_in_threads=True,
+                ),
+            }
+            for role_id in staff_role_ids:
+                role = guild.get_role(role_id)
+                if role:
+                    overwrites_thread[role] = discord.PermissionOverwrite(
+                        view_channel=True, manage_threads=True, send_messages_in_threads=True,
+                        read_message_history=True,
+                    )
+            await parent.edit(overwrites=overwrites_thread)
+        except Exception:
+            pass
+
     async def auto_repair_guild_permissions(self, guild: discord.Guild, data: Optional[dict] = None):
         """Silently attempts to repair permissions for all configured ticket channels in a guild."""
         try:
@@ -2011,6 +2015,14 @@ class TicketCog(commands.Cog, name="TicketCog"):
             esc_id = server_cfg.get("escalation_channel_id")
             if esc_id:
                 await fix_perms(guild.get_channel(esc_id) or await self.bot.fetch_channel(esc_id))
+
+            if server_cfg.get("ticket_mode") == "thread":
+                thread_chan_id = server_cfg.get("thread_channel_id")
+                if thread_chan_id:
+                    parent = guild.get_channel(thread_chan_id) or await self.bot.fetch_channel(thread_chan_id)
+                    if parent:
+                        staff_role_ids = [r for r in (server_cfg.get("staff_role_id"), server_cfg.get("staff2_role_id"), server_cfg.get("admin_role_id")) if r]
+                        await self._apply_thread_channel_overwrites(guild, parent, staff_role_ids)
 
             for pid, panel in data.get("panels", {}).items():
                 cat_id = panel.get("category_id")
