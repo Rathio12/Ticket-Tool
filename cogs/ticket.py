@@ -2328,6 +2328,50 @@ class TicketCog(commands.Cog, name="TicketCog"):
         )
         await interaction.response.send_message(f"✅ {' | '.join(changes) if changes else 'No changes.'}\n{current}", ephemeral=True)
 
+    @ticket.command(name="roles", description="Show which roles/channels are configured for this server's ticket system.")
+    async def ticket_roles(self, interaction: discord.Interaction):
+        if not self.is_staff_or_owner(interaction):
+            return await interaction.response.send_message("❌ This command is restricted to staff or owners.", ephemeral=True)
+        cfg = self._cfg(interaction.guild.id)
+
+        def fmt_role(key: str) -> str:
+            role_id = cfg.get(key)
+            if not role_id:
+                return "*Not set*"
+            if role_id == interaction.guild.id:
+                return "⚠️ **@everyone** — this is a bug, re-run `/setup` with a real role"
+            role = interaction.guild.get_role(role_id)
+            return role.mention if role else f"⚠️ Role `{role_id}` no longer exists"
+
+        def fmt_channel(key: str) -> str:
+            chan_id = cfg.get(key)
+            if not chan_id:
+                return "*Not set*"
+            chan = interaction.guild.get_channel(chan_id)
+            return chan.mention if chan else f"⚠️ Channel `{chan_id}` no longer exists"
+
+        fields = [
+            ("Ticket mode", f"`{cfg.get('ticket_mode', 'channel')}`", True),
+            ("Staff role", fmt_role("staff_role_id"), True),
+            ("Staff role 2", fmt_role("staff2_role_id"), True),
+            ("Admin role", fmt_role("admin_role_id"), True),
+            ("Ping role", fmt_role("ping_role_id"), True),
+            ("Transcript channel", fmt_channel("transcript_channel_id"), True),
+            ("Closed category", fmt_channel("closed_category_id"), True),
+            ("Escalation channel", fmt_channel("escalation_channel_id"), True),
+            ("Review channel", fmt_channel("review_channel_id"), True),
+            ("Error channel", fmt_channel("error_channel_id"), True),
+        ]
+        if cfg.get("ticket_mode") == "thread":
+            fields.append(("Thread channel", fmt_channel("thread_channel_id"), True))
+
+        await interaction.response.send_message(view=PanelView(
+            title="🔧 Ticket System Configuration",
+            description=f"Current settings for **{interaction.guild.name}**.",
+            fields=fields,
+            color=Colors.PRIMARY,
+        ), ephemeral=True)
+
     @ticket.command(name="bulk_transcript", description="Export all ticket transcripts as a single file.")
     async def ticket_bulk_transcript(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
