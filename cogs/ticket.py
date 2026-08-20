@@ -1624,7 +1624,48 @@ class TicketCog(commands.Cog, name="TicketCog"):
         await self.db.insert_message(ticket["id"], msg_data)
         self._mark_dirty(message.channel.id)
 
-    async def _run_close_flow(self, channel: discord.TextChannel, ticket: dict, reason: str = ""):
+    async def _send_transcript(self, guild: discord.Guild, ticket: dict, closed_by: Optional[discord.abc.User] = None):
+        ticket_id = str(ticket["id"])
+        file_path = self.db.get_ticket_path(guild.id, int(ticket["id"]))
+        try:
+            open_dt = datetime.datetime.fromisoformat(ticket["created_at"])
+        except Exception:
+            open_dt = datetime.datetime.now(datetime.timezone.utc)
+        try:
+            closed_dt = datetime.datetime.fromisoformat(ticket["closed_at"]) if ticket.get("closed_at") else datetime.datetime.now(datetime.timezone.utc)
+        except Exception:
+            closed_dt = datetime.datetime.now(datetime.timezone.utc)
+
+        transcript_panel = PanelView(
+            title="📄 Ticket Transcript",
+            description=f"Full record of ticket `#{ticket_id}` has been archived.",
+            fields=[
+                ("🎫 Ticket ID", f"`#{ticket_id}`",                                           True),
+                ("👤 Opened By", f"<@{ticket['creator_id']}>",                                True),
+                ("🔒 Closed By", closed_by.mention if closed_by else "Auto-closed",           True),
+                ("📅 Opened At", discord.utils.format_dt(open_dt, "F"),                       True),
+                ("📅 Closed At", discord.utils.format_dt(closed_dt, "F"),                     True),
+                ("❓ Resolution", ticket.get("close_reason", "Ticket completed."),             False),
+            ],
+            color=Colors.NEUTRAL,
+            thumbnail_url=guild.icon.url if guild.icon else None,
+            footer="Transcript sent to creator via DM",
+        )
+
+        cfg = self._cfg(guild.id)
+        tc_id = cfg.get("transcript_channel_id")
+        if tc_id:
+            tc = guild.get_channel(tc_id) or await self.bot.fetch_channel(tc_id)
+            await self.safe_send(tc, view=transcript_panel, file=discord.File(file_path) if file_path.exists() else None, allowed_mentions=discord.AllowedMentions.none())
+
+        creator = guild.get_member(ticket["creator_id"]) or await self.bot.fetch_user(ticket["creator_id"])
+        if creator:
+            try:
+                await creator.send(view=transcript_panel, file=discord.File(file_path) if file_path.exists() else None)
+            except:
+                pass
+
+    async def _run_close_flow(self, channel: discord.TextChannel, ticket: dict, reason: str = "", closed_by: Optional[discord.abc.User] = None):
         """Shared close logic."""
         try:
             guild = self.bot.get_guild(ticket["guild_id"])
@@ -1645,6 +1686,11 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 creator_id=ticket["creator_id"],
                 reason=closing_text,
             ))
+
+            try:
+                await self._send_transcript(guild, ticket, closed_by=closed_by)
+            except Exception as e:
+                await self.report_error("Transcript on Close", e)
 
             creator = guild.get_member(ticket["creator_id"]) or await self.bot.fetch_user(ticket["creator_id"])
             creator_name = creator.name.lower().replace(' ', '-') if creator else "unknown"
@@ -1730,7 +1776,7 @@ class TicketCog(commands.Cog, name="TicketCog"):
             if is_creator:
                 default_reason = "Ticket closed by the creator."
             ticket["close_reason"] = reason or default_reason
-            await self._run_close_flow(channel, ticket, reason=ticket["close_reason"])
+            await self._run_close_flow(channel, ticket, reason=ticket["close_reason"], closed_by=interaction.user)
             self.bot.ui.append_log("", "OK", f"ticket: closed #{ticket['id']} by {interaction.user} {'(creator)' if is_creator else '(staff)'} in {interaction.guild.name}")
         except Exception as e:
             await self.report_error("Ticket Closing", e, interaction)
@@ -1766,47 +1812,14 @@ class TicketCog(commands.Cog, name="TicketCog"):
             ticket_id = str(ticket["id"])
             self.ticket_cache.pop(channel.id, None)
 
-            creator_id = ticket["creator_id"]
-            file_path = self.db.get_ticket_path(interaction.guild.id, int(ticket["id"]))
-
             if ticket["status"] == "open":
                 ticket["status"] = "closed"
                 ticket["closed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 await self.db.update_ticket(ticket["id"], status="closed", closed_at=ticket["closed_at"])
                 await self.db.save_json_backup(interaction.guild.id, ticket)
                 self._mark_dirty(channel.id)
-            open_dt = datetime.datetime.fromisoformat(ticket["created_at"])
-            closed_dt = datetime.datetime.now(datetime.timezone.utc)
 
-            transcript_panel = PanelView(
-                title="📄 Ticket Transcript",
-                description=f"Full record of ticket `#{ticket_id}` has been archived.",
-                fields=[
-                    ("🎫 Ticket ID", f"`#{ticket_id}`",                                           True),
-                    ("👤 Opened By", f"<@{ticket['creator_id']}>",                                True),
-                    ("🔒 Closed By", f"<@{interaction.user.id}>",                                 True),
-                    ("📅 Opened At", discord.utils.format_dt(open_dt, "F"),                       True),
-                    ("📅 Closed At", discord.utils.format_dt(closed_dt, "F"),                     True),
-                    ("❓ Resolution", ticket.get("close_reason", "Ticket completed."),             False),
-                ],
-                color=Colors.NEUTRAL,
-                thumbnail_url=interaction.guild.icon.url if interaction.guild.icon else None,
-                footer="Transcript sent to creator via DM",
-            )
-
-            cfg = self._cfg(interaction.guild.id)
-
-            tc_id = cfg.get("transcript_channel_id")
-            if tc_id:
-                tc = interaction.guild.get_channel(tc_id) or await self.bot.fetch_channel(tc_id)
-                await self.safe_send(tc, view=transcript_panel, file=discord.File(file_path) if file_path.exists() else None, allowed_mentions=discord.AllowedMentions.none())
-
-            creator = interaction.guild.get_member(creator_id) or await self.bot.fetch_user(creator_id)
-            if creator:
-                try:
-                    await creator.send(view=transcript_panel, file=discord.File(file_path) if file_path.exists() else None)
-                except:
-                    pass
+            await self._send_transcript(interaction.guild, ticket, closed_by=interaction.user)
 
             try:
                 await channel.delete()

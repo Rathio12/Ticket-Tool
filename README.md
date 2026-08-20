@@ -55,8 +55,10 @@ within Discord's Terms of Service and Developer Policy.
 - **Ticket Panels** — Dropdown menu or button-based panel, fully custom labels/emojis.
 - **Ticket Lifecycle** — Open, claim, close, reopen, delete, transfer, escalate — all
   with proper per-guild permission management.
-- **Transcripts** — Automatic JSON transcript generation, archived per ticket and DM'd
-  to the creator on close.
+- **Transcripts** — Automatic JSON transcript generation, archived per ticket. Sent to
+  the configured transcript channel and DM'd to the creator the moment a ticket closes
+  (not only when it's later deleted), plus available on demand via the Transcript button
+  or `/ticket transcript`.
 - **Rating System** — 1–5 star rating DM sent after ticket close, with an optional
   review-log channel and a public `/reviews` command.
 - **Rate Limiting** — Configurable max open tickets and cooldown, per server.
