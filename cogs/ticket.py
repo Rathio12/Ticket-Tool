@@ -2097,20 +2097,7 @@ class TicketCog(commands.Cog, name="TicketCog"):
             await self._grant_access(interaction.channel, interaction.user)
 
             if isinstance(interaction.channel, discord.Thread):
-                staff2_id = cfg.get("staff2_role_id")
-                staff2 = interaction.guild.get_role(staff2_id) if staff2_id else None
-                if staff2:
-                    keep_role_ids = {cfg.get("staff_role_id"), cfg.get("admin_role_id")}
-                    keep_role_ids.discard(None)
-                    for member in staff2.members:
-                        if member.id == interaction.user.id or member.id in OWNER_IDS:
-                            continue
-                        if any(r.id in keep_role_ids for r in member.roles):
-                            continue
-                        try:
-                            await interaction.channel.remove_user(member)
-                        except Exception:
-                            pass
+                pass
             else:
                 staff2_id = cfg.get("staff2_role_id")
                 staff2 = interaction.guild.get_role(staff2_id) if staff2_id else None
@@ -2263,9 +2250,10 @@ class TicketCog(commands.Cog, name="TicketCog"):
             if ticket.get("claimant_id"):
                 old_claimant = interaction.guild.get_member(ticket["claimant_id"])
                 if old_claimant and old_claimant.id not in OWNER_IDS:
-                    staff_role_id = cfg.get("staff_role_id")
-                    has_main_staff = staff_role_id and any(r.id == staff_role_id for r in old_claimant.roles)
-                    if not has_main_staff:
+                    keep_role_ids = {cfg.get("staff_role_id"), cfg.get("staff2_role_id"), cfg.get("admin_role_id")}
+                    keep_role_ids.discard(None)
+                    is_staff_or_admin = any(r.id in keep_role_ids for r in old_claimant.roles)
+                    if not is_staff_or_admin:
                         await self._revoke_access(interaction.channel, old_claimant)
 
             ticket["claimant_id"] = None
