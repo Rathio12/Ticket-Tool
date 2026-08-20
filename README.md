@@ -126,7 +126,7 @@ test server instead.
 | `/ticket option edit` | Edit a ticket option | Staff |
 | `/ticket option remove` | Remove an option from a panel | Staff |
 | `/ticket panel` | Re-send a panel to the current channel | Staff |
-| `/ticket config` | Configure max tickets, cooldown, auto-close, SLA reminder, repeat-ticket window | Staff |
+| `/ticket config` | Configure max tickets, cooldown, auto-close, SLA reminder, repeat-ticket window, blocked roles | Staff |
 | `/ticket roles` | Show which roles/channels are currently configured | Staff |
 | `/ticket repair` | Audit and repair bot permissions | Staff |
 | `/ticket rename` | Rename the current ticket channel | Staff |

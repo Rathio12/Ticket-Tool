@@ -132,20 +132,26 @@ class TicketDB:
                 except Exception as e:
                     print(f"[DB] Migration skipped ticket file {ticket_file.name}: {e}")
 
+    def _read_config_sync(self):
+        try:
+            return json.loads(self.config_path.read_text(encoding="utf-8"))
+        except:
+            self._write_default_config()
+            return json.loads(self.config_path.read_text(encoding="utf-8"))
+
     async def get_config(self):
         async with self.lock:
-            try:
-                return json.loads(self.config_path.read_text(encoding="utf-8"))
-            except:
-                self._write_default_config()
-                return json.loads(self.config_path.read_text(encoding="utf-8"))
+            return await asyncio.to_thread(self._read_config_sync)
+
+    def _write_config_sync(self, data):
+        temp_path = self.config_path.with_suffix(".tmp")
+        temp_path.write_text(json.dumps(data, indent=4), encoding="utf-8")
+        temp_path.replace(self.config_path)
 
     async def save_config(self, data):
         async with self.lock:
             try:
-                temp_path = self.config_path.with_suffix(".tmp")
-                temp_path.write_text(json.dumps(data, indent=4), encoding="utf-8")
-                temp_path.replace(self.config_path)
+                await asyncio.to_thread(self._write_config_sync, data)
             except Exception as e:
                 print(f"[DB] Error saving config: {e}")
 
@@ -266,11 +272,14 @@ class TicketDB:
     def get_ticket_path(self, guild_id: int, ticket_id: int) -> Path:
         return self.tickets_dir / str(guild_id) / f"{ticket_id}.json"
 
-    async def save_json_backup(self, guild_id: int, ticket_data: dict):
+    def _save_json_backup_sync(self, guild_id: int, ticket_data: dict):
         guild_dir = self.tickets_dir / str(guild_id)
         guild_dir.mkdir(parents=True, exist_ok=True)
         path = self.get_ticket_path(guild_id, ticket_data['id'])
         path.write_text(json.dumps(ticket_data, indent=4), encoding="utf-8")
+
+    async def save_json_backup(self, guild_id: int, ticket_data: dict):
+        await asyncio.to_thread(self._save_json_backup_sync, guild_id, ticket_data)
 
 
 class TicketSelect(discord.ui.Select):
@@ -1382,6 +1391,13 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
             data = await self.db.get_config()
             server_cfg = data.get("server_config", {}).get(str(guild.id), {})
+
+            blocked_role_ids = set(server_cfg.get("blocked_role_ids", []))
+            if blocked_role_ids and isinstance(interaction.user, discord.Member):
+                user_role_ids = {r.id for r in interaction.user.roles}
+                if blocked_role_ids & user_role_ids:
+                    return await interaction.followup.send("❌ You're not permitted to open tickets in this server.", ephemeral=True)
+
             max_tickets = server_cfg.get("max_tickets", 3)
             cooldown_sec = server_cfg.get("cooldown_seconds", 300)
 
@@ -1606,7 +1622,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
             ticket["first_response_at"] = msg_data["timestamp"]
 
         await self.db.insert_message(ticket["id"], msg_data)
-        await self.db.save_json_backup(message.guild.id, ticket)
         self._mark_dirty(message.channel.id)
 
     async def _run_close_flow(self, channel: discord.TextChannel, ticket: dict, reason: str = ""):
@@ -2296,8 +2311,10 @@ class TicketCog(commands.Cog, name="TicketCog"):
         inactivity_hours="Auto-close tickets after N hours of inactivity (0 = disable)",
         sla_minutes="Remind staff if no one replies within N minutes of a ticket opening (0 = disable)",
         repeat_ticket_hours="Flag a new ticket as a repeat if the same user closed one on the same topic within N hours (0 = disable)",
+        block_role="Prevent members with this role from opening new tickets",
+        unblock_role="Allow members with this role to open tickets again",
     )
-    async def ticket_config(self, interaction: discord.Interaction, max_tickets: int = None, cooldown_seconds: int = None, inactivity_hours: int = None, sla_minutes: int = None, repeat_ticket_hours: int = None):
+    async def ticket_config(self, interaction: discord.Interaction, max_tickets: int = None, cooldown_seconds: int = None, inactivity_hours: int = None, sla_minutes: int = None, repeat_ticket_hours: int = None, block_role: discord.Role = None, unblock_role: discord.Role = None):
         if not self.is_staff_or_owner(interaction):
             return await interaction.response.send_message("❌ This command is restricted to staff or owners.", ephemeral=True)
         data = await self.db.get_config()
@@ -2318,15 +2335,27 @@ class TicketCog(commands.Cog, name="TicketCog"):
         if repeat_ticket_hours is not None:
             cfg["repeat_ticket_hours"] = max(repeat_ticket_hours, 0)
             changes.append(f"repeat_ticket_window → `{cfg['repeat_ticket_hours']}h`")
+        if block_role is not None:
+            blocked = set(cfg.get("blocked_role_ids", []))
+            blocked.add(block_role.id)
+            cfg["blocked_role_ids"] = list(blocked)
+            changes.append(f"blocked {block_role.mention}")
+        if unblock_role is not None:
+            blocked = set(cfg.get("blocked_role_ids", []))
+            blocked.discard(unblock_role.id)
+            cfg["blocked_role_ids"] = list(blocked)
+            changes.append(f"unblocked {unblock_role.mention}")
         await self._save_config(data)
+        blocked_mentions = ", ".join(f"<@&{rid}>" for rid in cfg.get("blocked_role_ids", [])) or "None"
         current = (
             f"**Current:** max_tickets=`{cfg.get('max_tickets', 3)}`, "
             f"cooldown=`{cfg.get('cooldown_seconds', 300)}s`, "
             f"inactivity_auto_close=`{cfg.get('inactivity_hours', 48)}h`, "
             f"sla_reminder=`{cfg.get('sla_minutes', 15)}m`, "
-            f"repeat_ticket_window=`{cfg.get('repeat_ticket_hours', 72)}h`"
+            f"repeat_ticket_window=`{cfg.get('repeat_ticket_hours', 72)}h`, "
+            f"blocked_roles={blocked_mentions}"
         )
-        await interaction.response.send_message(f"✅ {' | '.join(changes) if changes else 'No changes.'}\n{current}", ephemeral=True)
+        await interaction.response.send_message(f"✅ {' | '.join(changes) if changes else 'No changes.'}\n{current}", ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @ticket.command(name="roles", description="Show which roles/channels are configured for this server's ticket system.")
     async def ticket_roles(self, interaction: discord.Interaction):
@@ -2364,6 +2393,10 @@ class TicketCog(commands.Cog, name="TicketCog"):
         ]
         if cfg.get("ticket_mode") == "thread":
             fields.append(("Thread channel", fmt_channel("thread_channel_id"), True))
+
+        blocked = cfg.get("blocked_role_ids", [])
+        blocked_str = ", ".join(f"<@&{rid}>" for rid in blocked) if blocked else "*None*"
+        fields.append(("Blocked roles", blocked_str, False))
 
         await interaction.response.send_message(view=PanelView(
             title="🔧 Ticket System Configuration",
