@@ -695,6 +695,7 @@ class TicketCog(commands.Cog, name="TicketCog"):
         self.bot.loop.create_task(self._init())
 
         self.server_configs: Dict[str, dict] = {}
+        self._ticket_id_lock = asyncio.Lock()
 
         self.auto_permission_repair.start()
         self.backup_loop.start()
@@ -725,6 +726,16 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
     def _cfg(self, guild_id: int) -> dict:
         return self.server_configs.get(str(guild_id), {})
+
+    async def _allocate_ticket_id(self) -> int:
+        """Atomically bump and persist the ticket counter so two tickets
+        opened at the same time can never be assigned the same id."""
+        async with self._ticket_id_lock:
+            data = await self.db.get_config()
+            data["counters"]["tickets"] += 1
+            ticket_id = data["counters"]["tickets"]
+            await self._save_config(data)
+            return ticket_id
 
     async def initialize_cache(self):
         """Initializes the ticket cache from the database with last message times.
@@ -1408,8 +1419,8 @@ class TicketCog(commands.Cog, name="TicketCog"):
             opt = data["options"].get(str(option_id))
             label = opt["label"] if opt else "ticket"
 
-            data["counters"]["tickets"] += 1
-            ticket_id = data["counters"]["tickets"]
+            ticket_id = await self._allocate_ticket_id()
+            data["counters"]["tickets"] = ticket_id
 
             clean_label = label.lower().split()[0].replace(' ', '-')
             username = interaction.user.name.lower().replace(' ', '-')
@@ -1434,6 +1445,21 @@ class TicketCog(commands.Cog, name="TicketCog"):
                         reason=f"Ticket opened by {interaction.user}",
                     )
                     await ticket_channel.add_user(interaction.user)
+
+                    staff_members = {}
+                    for role_id in (staff_role_id, server_cfg.get("staff2_role_id"), server_cfg.get("admin_role_id")):
+                        if not role_id:
+                            continue
+                        role = guild.get_role(role_id)
+                        if not role:
+                            continue
+                        for member in role.members:
+                            staff_members[member.id] = member
+                    for member in staff_members.values():
+                        try:
+                            await ticket_channel.add_user(member)
+                        except Exception:
+                            pass
                 except discord.Forbidden:
                     await self.auto_repair_guild_permissions(interaction.guild)
                     await interaction.followup.send("❌ I am missing permissions to create ticket threads. I've attempted an auto-repair, please try again in a moment.", ephemeral=True)
@@ -2068,7 +2094,22 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
             await self._grant_access(interaction.channel, interaction.user)
 
-            if not isinstance(interaction.channel, discord.Thread):
+            if isinstance(interaction.channel, discord.Thread):
+                staff2_id = cfg.get("staff2_role_id")
+                staff2 = interaction.guild.get_role(staff2_id) if staff2_id else None
+                if staff2:
+                    keep_role_ids = {cfg.get("staff_role_id"), cfg.get("admin_role_id")}
+                    keep_role_ids.discard(None)
+                    for member in staff2.members:
+                        if member.id == interaction.user.id or member.id in OWNER_IDS:
+                            continue
+                        if any(r.id in keep_role_ids for r in member.roles):
+                            continue
+                        try:
+                            await interaction.channel.remove_user(member)
+                        except Exception:
+                            pass
+            else:
                 staff2_id = cfg.get("staff2_role_id")
                 staff2 = interaction.guild.get_role(staff2_id) if staff2_id else None
                 if staff2:
