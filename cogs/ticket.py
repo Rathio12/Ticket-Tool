@@ -939,9 +939,11 @@ class TicketCog(commands.Cog, name="TicketCog"):
             return
         try:
             if isinstance(channel, discord.Thread):
-                parent = channel.parent
-                if parent:
-                    await parent.set_permissions(role, view_channel=True, manage_threads=True, send_messages_in_threads=True, read_message_history=True)
+                for member in role.members:
+                    try:
+                        await channel.add_user(member)
+                    except Exception:
+                        pass
             else:
                 await channel.set_permissions(role, view_channel=True, send_messages=True, read_message_history=True)
         except Exception:
