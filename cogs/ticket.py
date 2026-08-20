@@ -1626,6 +1626,10 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
     async def _send_transcript(self, guild: discord.Guild, ticket: dict, closed_by: Optional[discord.abc.User] = None):
         ticket_id = str(ticket["id"])
+        try:
+            await self.db.save_json_backup(guild.id, ticket)
+        except Exception as e:
+            await self.report_error("Transcript Backup Write", e)
         file_path = self.db.get_ticket_path(guild.id, int(ticket["id"]))
         try:
             open_dt = datetime.datetime.fromisoformat(ticket["created_at"])
@@ -1844,6 +1848,11 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
             ticket_id = str(ticket["id"])
 
+            try:
+                await self.db.save_json_backup(interaction.guild.id, ticket)
+            except Exception as e:
+                await self.report_error("Transcript Backup Write", e, interaction)
+
             file_path = self.db.get_ticket_path(interaction.guild.id, int(ticket["id"]))
             if not file_path.exists():
                 await interaction.followup.send(view=PanelView(description="❌ No transcript data is available for this ticket yet.", color=Colors.ERROR), ephemeral=True)
@@ -1930,6 +1939,11 @@ class TicketCog(commands.Cog, name="TicketCog"):
         if not is_creator and not self.is_staff_or_owner(interaction):
             await interaction.response.send_message("❌ This command is restricted to the ticket creator, staff, or owners.", ephemeral=True)
             return
+
+        try:
+            await self.db.save_json_backup(interaction.guild.id, ticket)
+        except Exception as e:
+            await self.report_error("Transcript Backup Write", e, interaction)
 
         file_path = self.db.get_ticket_path(interaction.guild.id, int(ticket["id"]))
 
