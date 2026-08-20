@@ -121,6 +121,14 @@ timer — it's set to `0 4 * * *` (daily at 04:00) by default. For weekly instea
 that line to `0 4 * * 1` (04:00 every Monday), then `pm2 restart TicketV2`. Crash
 recovery (`autorestart: true`) is pm2's own equivalent of systemd's `Restart=on-failure`.
 
+A few other fields are tuned specifically for this bot: `kill_timeout: 10000` gives the
+bot's own SIGTERM handler (which sends the "🔁 Restarting" Discord message and closes the
+gateway connection cleanly) up to 10s to finish before pm2 force-kills it — the pm2
+default of 1.6s can cut that off mid-request. `max_memory_restart: "512M"` is a safety
+net that restarts the process if it ever leaks past that; `min_uptime: "30s"` stops pm2
+from treating a restart that happens to crash-loop within 30s as a "successful" restart
+for `max_restarts` accounting.
+
 **Important:** the ecosystem file sets `TICKETBOT_AUTO_SYSTEMD=0` explicitly. Leave that
 as-is — if it were left enabled and pm2 runs the bot as root, `main.py` would try to
 install *and start the systemd unit too* on every restart, giving you two competing

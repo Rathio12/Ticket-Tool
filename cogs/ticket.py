@@ -1721,6 +1721,14 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
     async def process_ticket_deletion(self, interaction: discord.Interaction):
         try:
+            if not self.is_staff_or_owner(interaction):
+                msg = "❌ This command is restricted to staff or owners."
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(msg, ephemeral=True)
+                else:
+                    await interaction.followup.send(msg, ephemeral=True)
+                return
+
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
 
@@ -1819,6 +1827,9 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
     async def reopen_ticket_process(self, interaction: discord.Interaction):
         try:
+            if not self.is_staff_or_owner(interaction):
+                return await interaction.response.send_message("❌ This command is restricted to staff or owners.", ephemeral=True)
+
             await interaction.response.defer()
             channel = interaction.channel
             ticket = self.ticket_cache.get(channel.id)
@@ -1978,18 +1989,10 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
     async def claim_ticket_process(self, interaction: discord.Interaction):
         try:
-            cfg = self._cfg(interaction.guild.id)
-            user_roles = {r.id for r in interaction.user.roles}
-            staff_ids = {cfg.get("staff_role_id"), cfg.get("staff2_role_id")}
-            staff_ids.discard(None)
-            has_perm = (
-                interaction.user.id in OWNER_IDS or
-                bool(staff_ids & user_roles) or
-                interaction.user.guild_permissions.administrator
-            )
-            if not has_perm:
+            if not self.is_staff_or_owner(interaction):
                 return await interaction.response.send_message("❌ You do not have permission to claim this ticket.", ephemeral=True)
 
+            cfg = self._cfg(interaction.guild.id)
             ticket = self.ticket_cache.get(interaction.channel.id)
 
             if not ticket:
