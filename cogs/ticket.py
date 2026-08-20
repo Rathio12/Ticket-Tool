@@ -940,6 +940,8 @@ class TicketCog(commands.Cog, name="TicketCog"):
         try:
             if isinstance(channel, discord.Thread):
                 for member in role.members:
+                    if member.bot:
+                        continue
                     try:
                         await channel.add_user(member)
                     except Exception:
@@ -1456,7 +1458,8 @@ class TicketCog(commands.Cog, name="TicketCog"):
                         if not role:
                             continue
                         for member in role.members:
-                            staff_members[member.id] = member
+                            if not member.bot:
+                                staff_members[member.id] = member
                     for member in staff_members.values():
                         try:
                             await ticket_channel.add_user(member)
