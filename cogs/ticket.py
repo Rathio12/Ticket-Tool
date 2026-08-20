@@ -1645,16 +1645,27 @@ class TicketCog(commands.Cog, name="TicketCog"):
             footer="Transcript sent to creator via DM",
         )
 
+        has_file = file_path.exists()
+        if not has_file:
+            await self.report_error(
+                "Transcript Backup Missing",
+                RuntimeError(f"No transcript file at {file_path} for ticket #{ticket_id} after a fresh save_json_backup call"),
+            )
+
         cfg = self._cfg(guild.id)
         tc_id = cfg.get("transcript_channel_id")
         if tc_id:
             tc = guild.get_channel(tc_id) or await self.bot.fetch_channel(tc_id)
-            await self.safe_send(tc, view=transcript_panel, file=discord.File(file_path) if file_path.exists() else None, allowed_mentions=discord.AllowedMentions.none())
+            await self.safe_send(tc, view=transcript_panel, allowed_mentions=discord.AllowedMentions.none())
+            if has_file:
+                await self.safe_send(tc, file=discord.File(file_path))
 
         creator = guild.get_member(ticket["creator_id"]) or await self.bot.fetch_user(ticket["creator_id"])
         if creator:
             try:
-                await creator.send(view=transcript_panel, file=discord.File(file_path) if file_path.exists() else None)
+                await creator.send(view=transcript_panel)
+                if has_file:
+                    await creator.send(file=discord.File(file_path))
             except:
                 pass
 
@@ -1811,8 +1822,7 @@ class TicketCog(commands.Cog, name="TicketCog"):
                 await self.db.update_ticket(ticket["id"], status="closed", closed_at=ticket["closed_at"])
                 await self.db.save_json_backup(interaction.guild.id, ticket)
                 self._mark_dirty(channel.id)
-
-            await self._send_transcript(interaction.guild, ticket, closed_by=interaction.user)
+                await self._send_transcript(interaction.guild, ticket, closed_by=interaction.user)
 
             try:
                 await channel.delete()
@@ -1849,8 +1859,8 @@ class TicketCog(commands.Cog, name="TicketCog"):
 
             await interaction.followup.send(
                 view=PanelView(title="📄 Transcript Ready", description="Your ticket transcript has been generated and is attached below.", color=Colors.PRIMARY),
-                file=discord.File(file_path),
             )
+            await interaction.followup.send(file=discord.File(file_path))
             self.bot.ui.append_log("", "OK", f"ticket: transcript generated for #{ticket_id} by {interaction.user} in {interaction.guild.name}")
         except Exception as e:
             await self.report_error("Transcript Generation", e, interaction)
