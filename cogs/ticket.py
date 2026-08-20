@@ -844,6 +844,7 @@ class TicketCog(commands.Cog, name="TicketCog"):
         cfg = self._cfg(interaction.guild.id)
         staff_ids = {cfg.get("staff_role_id"), cfg.get("staff2_role_id"), cfg.get("admin_role_id")}
         staff_ids.discard(None)
+        staff_ids.discard(interaction.guild.id)
         user_role_ids = {r.id for r in interaction.user.roles}
         return bool(staff_ids & user_role_ids)
 
@@ -1086,6 +1087,10 @@ class TicketCog(commands.Cog, name="TicketCog"):
             await interaction.response.defer(ephemeral=True)
             deferred = True
             guild = interaction.guild
+
+            for role_param, role_val in (("staff_role", staff_role), ("staff_role_2", staff_role_2), ("admin_role", admin_role), ("ping_role", ping_role)):
+                if role_val is not None and role_val.id == guild.id:
+                    return await interaction.followup.send(f"❌ `{role_param}` can't be @everyone — pick a real staff role.", ephemeral=True)
 
             perms = guild.me.guild_permissions
             if not perms.manage_channels or not perms.manage_roles:
