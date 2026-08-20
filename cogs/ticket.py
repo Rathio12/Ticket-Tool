@@ -939,13 +939,9 @@ class TicketCog(commands.Cog, name="TicketCog"):
             return
         try:
             if isinstance(channel, discord.Thread):
-                for member in role.members:
-                    if member.bot:
-                        continue
-                    try:
-                        await channel.add_user(member)
-                    except Exception:
-                        pass
+                parent = channel.parent
+                if parent:
+                    await parent.set_permissions(role, view_channel=True, manage_threads=True, send_messages_in_threads=True, read_message_history=True)
             else:
                 await channel.set_permissions(role, view_channel=True, send_messages=True, read_message_history=True)
         except Exception:
@@ -1449,22 +1445,6 @@ class TicketCog(commands.Cog, name="TicketCog"):
                         reason=f"Ticket opened by {interaction.user}",
                     )
                     await ticket_channel.add_user(interaction.user)
-
-                    staff_members = {}
-                    for role_id in (staff_role_id, server_cfg.get("staff2_role_id"), server_cfg.get("admin_role_id")):
-                        if not role_id:
-                            continue
-                        role = guild.get_role(role_id)
-                        if not role:
-                            continue
-                        for member in role.members:
-                            if not member.bot:
-                                staff_members[member.id] = member
-                    for member in staff_members.values():
-                        try:
-                            await ticket_channel.add_user(member)
-                        except Exception:
-                            pass
                 except discord.Forbidden:
                     await self.auto_repair_guild_permissions(interaction.guild)
                     await interaction.followup.send("❌ I am missing permissions to create ticket threads. I've attempted an auto-repair, please try again in a moment.", ephemeral=True)
@@ -1545,10 +1525,9 @@ class TicketCog(commands.Cog, name="TicketCog"):
             self.bot.ui.append_log("", "OK", f"ticket: opened #{ticket_id} ({label}) by {interaction.user} in {guild.name}")
 
             pings = [interaction.user.mention]
-            if staff_role_id:
-                pings.append(f"<@&{staff_role_id}>")
-            if ping_role_id and ping_role_id != staff_role_id:
-                pings.append(f"<@&{ping_role_id}>")
+            ping_target_id = ping_role_id or staff_role_id
+            if ping_target_id:
+                pings.append(f"<@&{ping_target_id}>")
             content = " ".join(pings)
 
             emoji = opt.get("emoji", "🎫") if opt else "🎫"
